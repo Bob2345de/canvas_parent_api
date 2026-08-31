@@ -9,7 +9,18 @@ from multidict import MultiDict
 
 from canvas_parent_api.errors.canvas_error import CanvasError
 
-from .models.base import ObserveeResponse, CourseResponse, AssignmentResponse, SubmissionResponse
+from .models.base import (
+    ObserveeResponse,
+    CourseResponse,
+    AssignmentResponse,
+    SubmissionResponse,
+    AnnouncementResponse,
+    CalendarEventResponse,
+    AssignmentGroupResponse,
+    TeacherResponse,
+    ModuleResponse,
+    ActivityStreamItemResponse,
+)
 
 _LOGGER = logging.getLogger(__name__)
 _LOGGER.setLevel(logging.INFO)
@@ -51,6 +62,17 @@ class CanvasApiClient():
                 if response.status >= 400:
                     raise CanvasError(response.status, responsetext)
                 return response
+
+    async def _get_paginated(self, end_url: str) -> list:
+        """Perform GET request, following all pagination links."""
+        parsed_json = []
+        next_url = end_url
+        while next_url:
+            response = await self._get_request(next_url)
+            parsed_json.extend(await response.json())
+            next = MultiDict(response.links.get('next', ''))
+            next_url = str(next.get('url')).replace(self._base_url, '') if next else None
+        return parsed_json
 
     async def get_observees(self) -> list[ObserveeResponse]:
         """Get Canvas Observees (students)."""
@@ -103,3 +125,69 @@ class CanvasApiClient():
         if response:
             return [SubmissionResponse(**resp) for resp in parsed_json]
         return []
+
+    async def get_announcements(self, course_id: int, start_date: str = None, end_date: str = None) -> list[AnnouncementResponse]:
+        """Get Canvas Announcements for a course."""
+        end_url = f"announcements?context_codes[]=course_{course_id}&per_page=50"
+        if start_date:
+            end_url += f"&start_date={start_date}"
+        if end_date:
+            end_url += f"&end_date={end_date}"
+        parsed_json = await self._get_paginated(end_url)
+        return [AnnouncementResponse(**resp) for resp in parsed_json]
+
+    async def get_calendar_events(self, student_id: int, start_date: str = None, end_date: str = None, event_type: str = "event") -> list[CalendarEventResponse]:
+        """Get Canvas Calendar Events for a student."""
+        end_url = f"users/{student_id}/calendar_events?type={event_type}&per_page=50"
+        if start_date:
+            end_url += f"&start_date={start_date}"
+        if end_date:
+            end_url += f"&end_date={end_date}"
+        parsed_json = await self._get_paginated(end_url)
+        return [CalendarEventResponse(**resp) for resp in parsed_json]
+
+    async def get_assignment(self, course_id: int, assignment_id: int) -> AssignmentResponse:
+        """Get a single Canvas Assignment with submission details."""
+        response = await self._get_request(
+            f"courses/{course_id}/assignments/{assignment_id}?include[]=submission"
+        )
+        parsed_json = await response.json()
+        return AssignmentResponse(**parsed_json)
+
+    async def get_assignment_groups(self, course_id: int) -> list[AssignmentGroupResponse]:
+        """Get Canvas Assignment Groups (grade categories) for a course."""
+        parsed_json = await self._get_paginated(
+            f"courses/{course_id}/assignment_groups?include[]=assignments&include[]=submission&per_page=50"
+        )
+        return [AssignmentGroupResponse(**resp) for resp in parsed_json]
+
+    async def get_course(self, course_id: int) -> CourseResponse:
+        """Get a single Canvas Course including syllabus body."""
+        response = await self._get_request(
+            f"courses/{course_id}?include[]=syllabus_body&include[]=term&include[]=public_description"
+        )
+        parsed_json = await response.json()
+        return CourseResponse(**parsed_json)
+
+    async def get_teachers(self, course_id: int) -> list[TeacherResponse]:
+        """Get Canvas Teachers for a course."""
+        parsed_json = await self._get_paginated(
+            f"courses/{course_id}/users?enrollment_type[]=teacher&include[]=email&include[]=avatar_url&include[]=bio&per_page=50"
+        )
+        return [TeacherResponse(**resp) for resp in parsed_json]
+
+    async def get_modules(self, course_id: int, student_id: int = None) -> list[ModuleResponse]:
+        """Get Canvas Modules with items and completion state for a course."""
+        end_url = f"courses/{course_id}/modules?include[]=items&per_page=50"
+        if student_id:
+            end_url += f"&student_id={student_id}"
+        parsed_json = await self._get_paginated(end_url)
+        return [ModuleResponse(**resp) for resp in parsed_json]
+
+    async def get_activity_stream(self, only_active_courses: bool = True) -> list[ActivityStreamItemResponse]:
+        """Get the Canvas Activity Stream for the current user."""
+        end_url = "users/self/activity_stream?per_page=50"
+        if only_active_courses:
+            end_url += "&only_active_courses=true"
+        parsed_json = await self._get_paginated(end_url)
+        return [ActivityStreamItemResponse(**resp) for resp in parsed_json]

@@ -16,6 +16,7 @@ class Assignment(DataModel):
         self._lock_at = assignment_resp.lock_at
         self._unlock_at = assignment_resp.unlock_at
         self._course_id = assignment_resp.course_id
+        self._assignment_group_id = assignment_resp.assignment_group_id
         self._points_possible = assignment_resp.points_possible
         self._has_submitted_submissions = assignment_resp.has_submitted_submissions
         self._quiz_id = assignment_resp.quiz_id
@@ -69,6 +70,11 @@ class Assignment(DataModel):
     def course_id(self) -> Optional[int]:
         """Property Definition."""
         return self._course_id
+
+    @property
+    def assignment_group_id(self) -> Optional[int]:
+        """Property Definition."""
+        return self._assignment_group_id
 
     @property
     def points_possible(self) -> Optional[float]:

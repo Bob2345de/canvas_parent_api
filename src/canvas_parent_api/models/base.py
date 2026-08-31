@@ -59,7 +59,7 @@ class AssignmentResponse(BaseModel):
     class Config:
         exclude = ['has_overrides', 'all_dates',
                    'html_url', 'submission_download_url',
-                   'assignment_group_id', 'due_date_required',
+                   'due_date_required',
                    'allowed_extensions', 'max_name_length',
                    'turnitin_enabled', 'vericite_enabled',
                    'turnitin_settings', 'grade_group_students_individually',
@@ -94,6 +94,7 @@ class AssignmentResponse(BaseModel):
     lock_at: Optional[str]
     unlock_at: Optional[str]
     course_id: Optional[int]
+    assignment_group_id: Optional[int] = Field(None)
     points_possible: Optional[float]
     has_submitted_submissions: Optional[bool]
     quiz_id: Optional[int]
@@ -129,3 +130,87 @@ class SubmissionResponse(BaseModel):
     late_policy_status: Optional[str]
     points_deducted: Optional[float]
     workflow_state: Optional[str]
+
+
+class AnnouncementResponse(BaseModel):
+    """Announcement Response Definition."""
+    id: int
+    title: Optional[str]
+    message: Optional[str]
+    posted_at: Optional[str]
+    delayed_post_at: Optional[str]
+    context_code: Optional[str]
+    read_state: Optional[str]
+    html_url: Optional[str] = Field(None)
+    url: Optional[str] = Field(None)
+    author: Optional[dict] = Field(None)
+
+
+class CalendarEventResponse(BaseModel):
+    """Calendar Event Response Definition."""
+    id: int
+    title: Optional[str]
+    description: Optional[str]
+    start_at: Optional[str]
+    end_at: Optional[str]
+    all_day: Optional[bool]
+    location_name: Optional[str] = Field(None)
+    location_address: Optional[str] = Field(None)
+    context_code: Optional[str]
+    context_name: Optional[str] = Field(None)
+    type: Optional[str] = Field(None)
+    html_url: Optional[str] = Field(None)
+    hidden: Optional[bool] = Field(None)
+    assignment: Optional[dict] = Field(None)
+
+
+class AssignmentGroupResponse(BaseModel):
+    """Assignment Group Response Definition."""
+    id: int
+    name: Optional[str]
+    position: Optional[int]
+    group_weight: Optional[float]
+    rules: Optional[dict] = Field(None)
+    assignments: Optional[list] = Field([None])
+
+
+class TeacherResponse(BaseModel):
+    """Teacher (Course User) Response Definition."""
+    id: int
+    name: Optional[str]
+    sortable_name: Optional[str]
+    short_name: Optional[str]
+    email: Optional[str] = Field(None)
+    avatar_url: Optional[str] = Field(None)
+    bio: Optional[str] = Field(None)
+    pronouns: Optional[str] = Field(None)
+
+
+class ModuleResponse(BaseModel):
+    """Module Response Definition."""
+    id: int
+    name: Optional[str]
+    position: Optional[int]
+    unlock_at: Optional[str]
+    require_sequential_progress: Optional[bool]
+    prerequisite_module_ids: Optional[list] = Field([None])
+    state: Optional[str] = Field(None)
+    completed_at: Optional[str] = Field(None)
+    items_count: Optional[int]
+    items: Optional[list] = Field(None)
+    published: Optional[bool] = Field(None)
+
+
+class ActivityStreamItemResponse(BaseModel):
+    """Activity Stream Item Response Definition."""
+    id: int
+    title: Optional[str]
+    message: Optional[str]
+    type: Optional[str]
+    read_state: Optional[bool] = Field(None)
+    context_type: Optional[str] = Field(None)
+    course_id: Optional[int] = Field(None)
+    group_id: Optional[int] = Field(None)
+    created_at: Optional[str]
+    updated_at: Optional[str]
+    html_url: Optional[str] = Field(None)
