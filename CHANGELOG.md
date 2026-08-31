@@ -1,5 +1,19 @@
 # Changelog
 
+[2026-08-31 15:00] - Fixed "can't compare offset-naive and offset-aware datetimes" in calendar/date handling
+Summary: Tools._parse_date in the Open WebUI tool could return a timezone-naive datetime when Canvas sent a date string without a UTC offset (e.g., date-only values for all-day calendar events), which then blew up when compared against timezone-aware datetime.now(timezone.utc). The parser now assumes UTC and attaches tzinfo to any naive result, so all date comparisons (calendar events, upcoming/missing/completed assignments, recent grades, activity stream) are safe.
+
+Files changed:
+
+Canvas Parent Monitor.json — _parse_date now normalizes naive parsed datetimes to timezone-aware UTC
+
+[2026-08-31 14:00] - Pointed Open WebUI tool requirements at the GitHub fork
+Summary: Changed the tool header requirements line from the PyPI package (canvas-parent-api>=0.0.24, which resolves to the official upstream release) to a PEP 508 direct URL that installs the fork from GitHub, so Open WebUI pulls this repo's version with the new endpoints.
+
+Files changed:
+
+Canvas Parent Monitor.json — requirements line now: canvas_parent_api @ https://github.com/Bob2345de/canvas_parent_api/archive/refs/heads/master.zip
+
 [2026-08-31 13:00] - Rewrote Canvas Parent Monitor Open WebUI tool with 16 self-explanatory tool methods
 Summary: Rebuilt the Open WebUI tool to use the newly added library endpoints (announcements, calendar events, assignment details/feedback, assignment groups, syllabus, teachers, modules, activity stream) and improved it generally: LLM-friendly docstrings with example questions, HTML-to-text conversion, course_name filtering, error aggregation, client cache invalidation on valve change, and a combined daily summary. Also exposed assignment_group_id on the Assignment model (needed for grades-by-category).
 

