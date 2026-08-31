@@ -1,0 +1,996 @@
+"""
+title: Canvas Parent Monitor
+description: Complete parent dashboard for Canvas LMS. List each child's courses, upcoming/missing/completed assignments, current grades, grades by category, teacher announcements, calendar events, assignment details with feedback, course syllabus, teacher contacts, module progress, and recent activity.
+author: Your Name
+version: 0.2.0
+requirements: canvas-parent-api>=0.0.24
+"""
+
+import asyncio
+import re
+from datetime import datetime, timedelta, timezone
+from typing import Any, Callable, List, Optional
+
+from pydantic import BaseModel, Field
+
+from canvas_parent_api import Canvas
+
+
+class Tools:
+    class Valves(BaseModel):
+        CANVAS_BASE_URL: str = Field(
+            default="https://yourschool.instructure.com",
+            description="Your Canvas Instance Base URL (e.g., https://myschool.instructure.com)",
+        )
+        CANVAS_API_TOKEN: str = Field(
+            default="",
+            description="Your Canvas Parent API Token (generated in Account → Settings)",
+            json_schema_extra={"input": {"type": "password"}},
+        )
+        CHILD_1_NAME: str = Field(
+            default="",
+            description="First child's name as it appears in Canvas (leave blank to fetch all children)",
+        )
+        CHILD_2_NAME: str = Field(
+            default="",
+            description="Second child's name as it appears in Canvas (leave blank if you only have one child)",
+        )
+        CHILD_3_NAME: str = Field(
+            default="",
+            description="Third child's name as it appears in Canvas (leave blank if not needed)",
+        )
+
+    def __init__(self):
+        self.valves = self.Valves()
+        self._client: Optional[Canvas] = None
+        self._client_key: Optional[tuple] = None
+
+    # ------------------------------------------------------------------
+    # Helper methods (internal, not exposed to the LLM)
+    # ------------------------------------------------------------------
+    def _get_client(self) -> Canvas:
+        """Return a cached Canvas client, rebuilt if valve settings changed."""
+        key = (self.valves.CANVAS_BASE_URL, self.valves.CANVAS_API_TOKEN)
+        if self._client is None or self._client_key != key:
+            self._client = Canvas(key[0], key[1])
+            self._client_key = key
+        return self._client
+
+    @staticmethod
+    def _parse_date(date_str) -> Optional[datetime]:
+        """Parse Canvas ISO-8601 date string (possibly ending in 'Z') to UTC datetime."""
+        if not date_str:
+            return None
+        try:
+            return datetime.fromisoformat(str(date_str).replace("Z", "+00:00"))
+        except (ValueError, AttributeError):
+            return None
+
+    @classmethod
+    def _fmt_dt(cls, date_str, with_time: bool = True) -> str:
+        """Format a Canvas date string for humans, e.g. 'Sep 04, 2026 at 11:59 PM'."""
+        dt = cls._parse_date(date_str)
+        if not dt:
+            return "unknown date"
+        if with_time and (dt.hour or dt.minute):
+            return dt.strftime("%b %d, %Y at %I:%M %p")
+        return dt.strftime("%b %d, %Y")
+
+    @staticmethod
+    def _strip_html(text, max_len: int = 600) -> str:
+        """Convert an HTML fragment to readable plain text, truncated to max_len."""
+        if not text:
+            return ""
+        text = re.sub(r"<(script|style)[^>]*>.*?</\1>", " ", text, flags=re.S | re.I)
+        text = re.sub(r"<br\s*/?>|</p>|</div>|</li>|</h[1-6]>", "\n", text, flags=re.I)
+        text = re.sub(r"<[^>]+>", " ", text)
+        for ent, rep in (("&nbsp;", " "), ("&amp;", "&"), ("&lt;", "<"), ("&gt;", ">"), ("&quot;", '"'), ("&#39;", "'")):
+            text = text.replace(ent, rep)
+        text = re.sub(r"[ \t]+", " ", text)
+        text = re.sub(r"\n\s*\n+", "\n", text).strip()
+        if max_len and len(text) > max_len:
+            text = text[:max_len].rstrip() + "…"
+        return text
+
+    @staticmethod
+    def _format_grade(score, points_possible, grade=None) -> str:
+        """Return a human-readable grade string like '18/20 (90.0%)'."""
+        if points_possible and score is not None:
+            try:
+                pct = (float(score) / float(points_possible)) * 100
+                return f"{score}/{points_possible} ({pct:.1f}%)"
+            except (ValueError, TypeError, ZeroDivisionError):
+                pass
+        if grade is not None:
+            if points_possible:
+                return f"{grade} (out of {points_possible})"
+            return str(grade)
+        return "No grade"
+    def _get_configured_names(self) -> List[str]:
+        """Return non-empty configured child names from valves."""
+        names = []
+        for attr in ("CHILD_1_NAME", "CHILD_2_NAME", "CHILD_3_NAME"):
+            val = (getattr(self.valves, attr, "") or "").strip()
+            if val:
+                names.append(val)
+        return names
+
+    @staticmethod
+    def _match_student(student, child_name: str) -> bool:
+        """Case-insensitive substring match of child_name against student name fields."""
+        query = (child_name or "").strip().lower()
+        if not query:
+            return True
+        for field in (student.name, student.short_name, student.sortable_name):
+            if field and query in field.lower():
+                return True
+        return False
+
+    async def _get_filtered_students(self, child_name: Optional[str] = None) -> tuple:
+        """
+        Fetch observees and filter by child_name (or configured valve names).
+        Returns (students, error_message); students is None on error.
+        """
+        client = self._get_client()
+        try:
+            students = await client.observees()
+        except Exception as e:
+            return None, f"❌ Error fetching students: {e}"
+
+        if not students:
+            return None, "⚠️ No children are linked to this parent account."
+
+        if child_name and child_name.strip():
+            filter_names = [child_name.strip()]
+        else:
+            filter_names = self._get_configured_names()
+
+        if filter_names:
+            filtered = []
+            for s in students:
+                if any(self._match_student(s, name) for name in filter_names):
+                    filtered.append(s)
+            if not filtered:
+                available = ", ".join(s.name for s in students)
+                return None, (
+                    f"⚠️ No child matching '{', '.join(filter_names)}' was found. "
+                    f"Available children: {available}"
+                )
+            students = filtered
+
+        return students, None
+
+    async def _get_filtered_courses(self, student, course_name: str = "") -> tuple:
+        """
+        Fetch a student's courses, optionally filtered by course_name substring.
+        Returns (courses, error_message); courses is None on error.
+        """
+        client = self._get_client()
+        try:
+            courses = await client.courses(student.id)
+        except Exception as e:
+            return None, f"Error fetching courses for {student.name}: {e}"
+
+        query = (course_name or "").strip().lower()
+        if query:
+            matched = [
+                c for c in courses
+                if (c.name and query in c.name.lower())
+                or (c.course_code and query in c.course_code.lower())
+            ]
+            if not matched:
+                available = ", ".join(c.name for c in courses if c.name)
+                return None, (
+                    f"No course matching '{course_name}' for {student.name}. "
+                    f"Available courses: {available}"
+                )
+            return matched, None
+        return courses, None
+
+    async def _process_all_assignments(
+        self,
+        student,
+        callback: Callable[[Any, Any], Any],
+        error_list: List[str],
+        course_name: str = "",
+    ) -> None:
+        """Call callback(assignment, course) for every assignment of the student."""
+        client = self._get_client()
+        courses, error = await self._get_filtered_courses(student, course_name)
+        if error:
+            error_list.append(error)
+            return
+
+        for course in courses:
+            try:
+                assignments = await client.assignments(student.id, course.id)
+            except Exception as e:
+                error_list.append(f"Error fetching assignments for {course.name}: {e}")
+                continue
+            for assignment in assignments:
+                await callback(assignment, course)
+
+    @staticmethod
+    def _enrollment_grade(course) -> str:
+        """Extract the current grade/score from a course's enrollments list."""
+        for enrollment in course.enrollments or []:
+            if not isinstance(enrollment, dict):
+                continue
+            grade = enrollment.get("computed_current_grade") or enrollment.get(
+                "current_period_computed_current_grade"
+            )
+            score = enrollment.get("computed_current_score")
+            if score is None:
+                score = enrollment.get("current_period_computed_current_score")
+            if grade is not None and score is not None:
+                return f"{grade} ({score}%)"
+            if score is not None:
+                return f"{score}%"
+            if grade is not None:
+                return str(grade)
+        return "No grade posted"
+    # ------------------------------------------------------------------
+    # Tool methods (exposed to the LLM)
+    # ------------------------------------------------------------------
+    async def list_children(self) -> str:
+        """
+        List all children (students) linked to this parent's Canvas account.
+        Use this first if you are unsure which children exist or how their names are spelled.
+        """
+        students, error = await self._get_filtered_students("")
+        if error:
+            return error
+        lines = ["👨‍👩‍👧‍👦 **Children linked to this Canvas parent account:**"]
+        for s in students:
+            lines.append(f"  • **{s.name}** (id: {s.id})")
+        return "\n".join(lines)
+
+    async def list_courses(self, child_name: str = "") -> str:
+        """
+        List the courses each child is enrolled in, with course code, term, and current grade.
+        Answers questions like "what classes does X have?" or "what is X's grade in each class?"
+
+        :param child_name: Optional name of a specific child. Leave empty for all children.
+        """
+        students, error = await self._get_filtered_students(child_name)
+        if error:
+            return error
+
+        results = []
+        errors = []
+        for student in students:
+            results.append(f"\n👤 **{student.name}**")
+            courses, err = await self._get_filtered_courses(student)
+            if err:
+                errors.append(err)
+                continue
+            if not courses:
+                results.append("  ℹ️ No active courses found.")
+                continue
+            for course in courses:
+                term = ""
+                if isinstance(course.term, dict) and course.term.get("name"):
+                    term = f" | Term: {course.term['name']}"
+                code = f" ({course.course_code})" if course.course_code else ""
+                results.append(
+                    f"  📘 **{course.name}**{code}{term} — Current grade: {self._enrollment_grade(course)}"
+                )
+
+        if errors:
+            results.append("\n⚠️ **Some data could not be retrieved:**")
+            results.extend(f"  - {e}" for e in errors)
+        return "\n".join(results)
+
+    async def get_current_grades(self, child_name: str = "") -> str:
+        """
+        Get the current overall grade in every course for each child.
+        Use this for questions like "how is X doing?" or "what are X's grades?"
+
+        :param child_name: Optional name of a specific child. Leave empty for all children.
+        """
+        students, error = await self._get_filtered_students(child_name)
+        if error:
+            return error
+
+        results = []
+        errors = []
+        for student in students:
+            results.append(f"\n📊 **{student.name} — Current Grades**")
+            courses, err = await self._get_filtered_courses(student)
+            if err:
+                errors.append(err)
+                continue
+            if not courses:
+                results.append("  ℹ️ No active courses found.")
+                continue
+            for course in courses:
+                results.append(f"  • {course.name}: **{self._enrollment_grade(course)}**")
+
+        if errors:
+            results.append("\n⚠️ **Some data could not be retrieved:**")
+            results.extend(f"  - {e}" for e in errors)
+        return "\n".join(results)
+
+    async def get_upcoming_assignments(
+        self, days_ahead: int = 7, child_name: str = "", course_name: str = ""
+    ) -> str:
+        """
+        Get upcoming assignments and tests that are due in the next N days and not yet submitted.
+        Use for "what does X have due this week?" or "any tests coming up?"
+
+        :param days_ahead: Number of days to look ahead (default: 7)
+        :param child_name: Optional name of a specific child. Leave empty for all children.
+        :param course_name: Optional course name to limit results to one class.
+        """
+        students, error = await self._get_filtered_students(child_name)
+        if error:
+            return error
+
+        now = datetime.now(timezone.utc)
+        cutoff_date = now + timedelta(days=days_ahead)
+        results = []
+        errors = []
+
+        for student in students:
+            results.append(f"\n👤 **{student.name}**")
+            upcoming_by_course = {}
+
+            async def collect(assignment, course):
+                due_date = self._parse_date(assignment.due_at)
+                if not due_date or not (now <= due_date <= cutoff_date):
+                    return
+                sub = assignment.submission
+                submitted = False
+                if isinstance(sub, dict):
+                    submitted = sub.get("workflow_state", "") in ("submitted", "graded")
+                if not submitted:
+                    pts = f" ({assignment.points_possible} pts)" if assignment.points_possible else ""
+                    upcoming_by_course.setdefault(course.name, []).append(
+                        f"    • **{assignment.name}**{pts} — Due: {self._fmt_dt(assignment.due_at)}"
+                    )
+
+            await self._process_all_assignments(student, collect, errors, course_name)
+
+            if upcoming_by_course:
+                results.append("  📚 **Upcoming Work:**")
+                for cname, items in upcoming_by_course.items():
+                    results.append(f"  **{cname}**:")
+                    results.extend(items)
+            else:
+                results.append(
+                    f"  ✅ No upcoming assignments or tests in the next {days_ahead} days!"
+                )
+
+        if errors:
+            results.append("\n⚠️ **Some data could not be retrieved:**")
+            results.extend(f"  - {e}" for e in errors)
+        return "\n".join(results)
+    async def get_missing_assignments(self, child_name: str = "", course_name: str = "") -> str:
+        """
+        Get assignments that are marked missing or are past due with no submission.
+        Use for "is X missing any work?" or "does X have late assignments?"
+
+        :param child_name: Optional name of a specific child. Leave empty for all children.
+        :param course_name: Optional course name to limit results to one class.
+        """
+        students, error = await self._get_filtered_students(child_name)
+        if error:
+            return error
+
+        now = datetime.now(timezone.utc)
+        results = []
+        errors = []
+
+        for student in students:
+            results.append(f"\n🚨 **{student.name} — Missing Work**")
+            missing_by_course = {}
+
+            async def collect(assignment, course):
+                sub = assignment.submission
+                is_missing = False
+                if isinstance(sub, dict):
+                    if sub.get("missing"):
+                        is_missing = True
+                    elif sub.get("workflow_state") == "unsubmitted" and not sub.get("excused"):
+                        due_date = self._parse_date(assignment.due_at)
+                        if due_date and due_date < now:
+                            is_missing = True
+                if is_missing:
+                    pts = f" ({assignment.points_possible} pts)" if assignment.points_possible else ""
+                    missing_by_course.setdefault(course.name, []).append(
+                        f"    • **{assignment.name}**{pts} — Was due: {self._fmt_dt(assignment.due_at)}"
+                    )
+
+            await self._process_all_assignments(student, collect, errors, course_name)
+
+            if missing_by_course:
+                for cname, items in missing_by_course.items():
+                    results.append(f"  **{cname}**:")
+                    results.extend(items)
+            else:
+                results.append("  ✅ No missing assignments — great job!")
+
+        if errors:
+            results.append("\n⚠️ **Some data could not be retrieved:**")
+            results.extend(f"  - {e}" for e in errors)
+        return "\n".join(results)
+    async def get_completed_assignments(
+        self, days_back: int = 14, child_name: str = "", course_name: str = ""
+    ) -> str:
+        """
+        Get assignments submitted in the last N days, with submission date and grade if posted.
+        Use for "what has X turned in recently?" or "what did X finish this week?"
+
+        :param days_back: Number of days to look back (default: 14)
+        :param child_name: Optional name of a specific child. Leave empty for all children.
+        :param course_name: Optional course name to limit results to one class.
+        """
+        students, error = await self._get_filtered_students(child_name)
+        if error:
+            return error
+
+        cutoff_date = datetime.now(timezone.utc) - timedelta(days=days_back)
+        results = []
+        errors = []
+
+        for student in students:
+            results.append(f"\n📝 **{student.name} — Recently Submitted Work**")
+            completed_by_course = {}
+
+            async def collect(assignment, course):
+                sub = assignment.submission
+                if not isinstance(sub, dict):
+                    return
+                if sub.get("workflow_state") not in ("submitted", "graded"):
+                    return
+                submit_date = self._parse_date(sub.get("submitted_at"))
+                if not submit_date or submit_date < cutoff_date:
+                    return
+
+                due_str = ""
+                if assignment.due_at:
+                    due_str = f" | Due: {self._fmt_dt(assignment.due_at, with_time=False)}"
+                grade_str = ""
+                if sub.get("grade") is not None or sub.get("score") is not None:
+                    grade_str = f" | Grade: {self._format_grade(sub.get('score'), assignment.points_possible, sub.get('grade'))}"
+                late_str = " ⚠️ LATE" if sub.get("late") else ""
+
+                completed_by_course.setdefault(course.name, []).append(
+                    f"    • **{assignment.name}** — Submitted: {submit_date.strftime('%b %d, %Y')}"
+                    f"{due_str}{grade_str}{late_str}"
+                )
+
+            await self._process_all_assignments(student, collect, errors, course_name)
+
+            if completed_by_course:
+                for cname, items in completed_by_course.items():
+                    results.append(f"  📘 **{cname}**:")
+                    results.extend(items)
+            else:
+                results.append(
+                    f"  ℹ️ No completed assignments found in the last {days_back} days."
+                )
+
+        if errors:
+            results.append("\n⚠️ **Some data could not be retrieved:**")
+            results.extend(f"  - {e}" for e in errors)
+        return "\n".join(results)
+    async def get_recent_grades(
+        self, days_back: int = 7, child_name: str = "", course_name: str = ""
+    ) -> str:
+        """
+        Get grades that teachers posted in the last N days.
+        Use for "any new grades for X?" or "what did X score on recent work?"
+
+        :param days_back: Number of days to look back (default: 7)
+        :param child_name: Optional name of a specific child. Leave empty for all children.
+        :param course_name: Optional course name to limit results to one class.
+        """
+        students, error = await self._get_filtered_students(child_name)
+        if error:
+            return error
+
+        cutoff_date = datetime.now(timezone.utc) - timedelta(days=days_back)
+        results = []
+        errors = []
+
+        for student in students:
+            results.append(f"\n🆕 **{student.name} — Recently Graded Work**")
+            graded_by_course = {}
+
+            async def collect(assignment, course):
+                sub = assignment.submission
+                if not isinstance(sub, dict) or sub.get("workflow_state") != "graded":
+                    return
+                graded_date = self._parse_date(sub.get("graded_at") or sub.get("posted_at"))
+                if not graded_date or graded_date < cutoff_date:
+                    return
+                grade_str = self._format_grade(
+                    sub.get("score"), assignment.points_possible, sub.get("grade")
+                )
+                graded_by_course.setdefault(course.name, []).append(
+                    f"    • **{assignment.name}** — {grade_str}"
+                    f" (graded {graded_date.strftime('%b %d')})"
+                )
+
+            await self._process_all_assignments(student, collect, errors, course_name)
+
+            if graded_by_course:
+                for cname, items in graded_by_course.items():
+                    results.append(f"  📘 **{cname}**:")
+                    results.extend(items)
+            else:
+                results.append(f"  ℹ️ No new grades posted in the last {days_back} days.")
+
+        if errors:
+            results.append("\n⚠️ **Some data could not be retrieved:**")
+            results.extend(f"  - {e}" for e in errors)
+        return "\n".join(results)
+
+    async def get_announcements(
+        self, days_back: int = 7, child_name: str = "", course_name: str = ""
+    ) -> str:
+        """
+        Get recent teacher announcements for each child's courses.
+        Use for "any news from X's teachers?" or "what did the teacher post this week?"
+
+        :param days_back: How many days of announcements to fetch (default: 7)
+        :param child_name: Optional name of a specific child. Leave empty for all children.
+        :param course_name: Optional course name to limit results to one class.
+        """
+        students, error = await self._get_filtered_students(child_name)
+        if error:
+            return error
+
+        client = self._get_client()
+        results = []
+        errors = []
+
+        for student in students:
+            results.append(f"\n📢 **Announcements for {student.name}** (last {days_back} days)")
+            courses, err = await self._get_filtered_courses(student, course_name)
+            if err:
+                errors.append(err)
+                continue
+
+            found_any = False
+            for course in courses:
+                try:
+                    announcements = await client.announcements(course.id, days_back=days_back)
+                except Exception as e:
+                    errors.append(f"Error fetching announcements for {course.name}: {e}")
+                    continue
+                if not announcements:
+                    continue
+                found_any = True
+                results.append(f"  📘 **{course.name}**:")
+                for ann in announcements:
+                    author = ""
+                    if isinstance(ann.author, dict) and ann.author.get("display_name"):
+                        author = f" — {ann.author['display_name']}"
+                    results.append(
+                        f"    • **{ann.title}** ({self._fmt_dt(ann.posted_at, with_time=False)}){author}"
+                    )
+                    body = self._strip_html(ann.message, max_len=400)
+                    if body:
+                        results.append(f"      {body}")
+
+            if not found_any:
+                results.append(f"  ℹ️ No announcements in the last {days_back} days.")
+
+        if errors:
+            results.append("\n⚠️ **Some data could not be retrieved:**")
+            results.extend(f"  - {e}" for e in errors)
+        return "\n".join(results)
+
+    async def get_calendar_events(self, days_ahead: int = 14, child_name: str = "") -> str:
+        """
+        Get upcoming calendar events (tests, field trips, meetings, school events) for each child.
+        This covers scheduled events beyond regular assignments.
+        Use for "what's on X's calendar?" or "anything happening at school soon?"
+
+        :param days_ahead: How many days ahead to look (default: 14)
+        :param child_name: Optional name of a specific child. Leave empty for all children.
+        """
+        students, error = await self._get_filtered_students(child_name)
+        if error:
+            return error
+
+        client = self._get_client()
+        results = []
+        errors = []
+
+        for student in students:
+            results.append(f"\n📅 **Calendar for {student.name}** (next {days_ahead} days)")
+            try:
+                events = await client.calendar_events(student.id, days_ahead=days_ahead)
+            except Exception as e:
+                errors.append(f"Error fetching calendar events for {student.name}: {e}")
+                continue
+
+            if not events:
+                results.append("  ℹ️ No calendar events scheduled.")
+                continue
+            for event in sorted(events, key=lambda e: e.start_at or ""):
+                when = self._fmt_dt(event.start_at, with_time=not event.all_day)
+                context = f" [{event.context_name}]" if event.context_name else ""
+                location = f" @ {event.location_name}" if event.location_name else ""
+                results.append(f"  • **{event.title}** — {when}{context}{location}")
+                desc = self._strip_html(event.description, max_len=200)
+                if desc:
+                    results.append(f"    {desc}")
+
+        if errors:
+            results.append("\n⚠️ **Some data could not be retrieved:**")
+            results.extend(f"  - {e}" for e in errors)
+        return "\n".join(results)
+    async def get_assignment_details(
+        self, assignment_name: str, child_name: str = "", course_name: str = ""
+    ) -> str:
+        """
+        Get full details for one specific assignment: description, due date, points,
+        submission status, grade, and teacher feedback comments.
+        Use for "why did X get that grade?" or "what is the [assignment] about?"
+
+        :param assignment_name: Name (or part of the name) of the assignment to look up. Required.
+        :param child_name: Optional name of a specific child. Leave empty for all children.
+        :param course_name: Optional course name to narrow the search (faster).
+        """
+        if not assignment_name or not assignment_name.strip():
+            return "❌ Please provide the assignment name (or part of it) to look up."
+
+        students, error = await self._get_filtered_students(child_name)
+        if error:
+            return error
+
+        client = self._get_client()
+        query = assignment_name.strip().lower()
+        results = []
+        errors = []
+
+        for student in students:
+            matches = []
+
+            async def collect(assignment, course):
+                if assignment.name and query in assignment.name.lower():
+                    matches.append((assignment, course))
+
+            await self._process_all_assignments(student, collect, errors, course_name)
+
+            if not matches:
+                results.append(
+                    f"\nℹ️ No assignment matching '{assignment_name}' found for {student.name}."
+                )
+                continue
+
+            for assignment, course in matches[:5]:
+                results.append(f"\n📋 **{assignment.name}** ({course.name}) — {student.name}")
+                if assignment.due_at:
+                    results.append(f"  • Due: {self._fmt_dt(assignment.due_at)}")
+                if assignment.points_possible is not None:
+                    results.append(f"  • Points possible: {assignment.points_possible}")
+                desc = self._strip_html(assignment.description, max_len=500)
+                if desc:
+                    results.append(f"  • Description: {desc}")
+
+                sub = assignment.submission
+                if isinstance(sub, dict):
+                    status = sub.get("workflow_state", "unknown")
+                    results.append(f"  • Status: {status}")
+                    if sub.get("submitted_at"):
+                        results.append(f"  • Submitted: {self._fmt_dt(sub['submitted_at'])}")
+                    if sub.get("grade") is not None or sub.get("score") is not None:
+                        results.append(
+                            f"  • Grade: {self._format_grade(sub.get('score'), assignment.points_possible, sub.get('grade'))}"
+                        )
+                    if sub.get("late"):
+                        results.append("  • ⚠️ Marked LATE")
+                    if sub.get("missing"):
+                        results.append("  • 🚨 Marked MISSING")
+
+                    # Teacher feedback comments (needs the detail endpoint)
+                    try:
+                        detail = await client.assignment(course.id, assignment.id)
+                        detail_sub = detail.submission
+                        comments = (
+                            detail_sub.get("submission_comments")
+                            if isinstance(detail_sub, dict)
+                            else None
+                        )
+                        if comments:
+                            results.append("  • 💬 Teacher feedback:")
+                            for c in comments[:5]:
+                                if isinstance(c, dict):
+                                    who = c.get("author_name", "Unknown")
+                                    text = self._strip_html(c.get("comment", ""), max_len=300)
+                                    results.append(f"      - {who}: {text}")
+                    except Exception:
+                        pass  # comments are best-effort
+
+                if assignment.rubric and any(assignment.rubric):
+                    results.append(f"  • Rubric: {len([r for r in assignment.rubric if r])} criteria defined")
+
+            if len(matches) > 5:
+                results.append(f"  ℹ️ {len(matches) - 5} more matches not shown; be more specific.")
+
+        if errors:
+            results.append("\n⚠️ **Some data could not be retrieved:**")
+            results.extend(f"  - {e}" for e in errors)
+        return "\n".join(results)
+    async def get_grades_by_category(self, child_name: str = "", course_name: str = "") -> str:
+        """
+        Break down each course grade by assignment category (e.g., Homework, Quizzes, Tests)
+        including category weights and the child's average in each category.
+        Use for "where is X losing points?" or "how is X doing on tests vs homework?"
+
+        :param child_name: Optional name of a specific child. Leave empty for all children.
+        :param course_name: Optional course name to limit results to one class.
+        """
+        students, error = await self._get_filtered_students(child_name)
+        if error:
+            return error
+
+        client = self._get_client()
+        results = []
+        errors = []
+
+        for student in students:
+            results.append(f"\n📊 **{student.name} — Grades by Category**")
+            courses, err = await self._get_filtered_courses(student, course_name)
+            if err:
+                errors.append(err)
+                continue
+
+            for course in courses:
+                try:
+                    groups = await client.assignment_groups(course.id)
+                    assignments = await client.assignments(student.id, course.id)
+                except Exception as e:
+                    errors.append(f"Error fetching categories for {course.name}: {e}")
+                    continue
+
+                # Aggregate the student's graded scores per assignment group
+                stats = {}  # group_id -> [earned, possible, graded_count]
+                for a in assignments:
+                    sub = a.submission
+                    if not isinstance(sub, dict) or sub.get("score") is None:
+                        continue
+                    if not a.points_possible:
+                        continue
+                    gid = a.assignment_group_id
+                    earned, possible, count = stats.get(gid, (0.0, 0.0, 0))
+                    stats[gid] = (
+                        earned + float(sub["score"]),
+                        possible + float(a.points_possible),
+                        count + 1,
+                    )
+
+                results.append(f"  📘 **{course.name}**:")
+                if not groups:
+                    results.append("    ℹ️ No assignment categories defined.")
+                    continue
+                for group in sorted(groups, key=lambda g: g.position or 0):
+                    weight = f" (weight: {group.group_weight}%)" if group.group_weight else ""
+                    earned, possible, count = stats.get(group.id, (0.0, 0.0, 0))
+                    if count and possible:
+                        pct = earned / possible * 100
+                        avg = f"{earned:g}/{possible:g} pts ({pct:.1f}%) across {count} graded"
+                    else:
+                        avg = "no graded work yet"
+                    results.append(f"    • **{group.name}**{weight}: {avg}")
+
+        if errors:
+            results.append("\n⚠️ **Some data could not be retrieved:**")
+            results.extend(f"  - {e}" for e in errors)
+        return "\n".join(results)
+
+    async def get_course_syllabus(self, course_name: str, child_name: str = "") -> str:
+        """
+        Get the syllabus / course description for a specific course, if the teacher published one.
+        Use for "what are the grading policies in X's math class?" or "what is this course about?"
+
+        :param course_name: Name (or part of the name) of the course. Required.
+        :param child_name: Optional name of a specific child. Leave empty for all children.
+        """
+        if not course_name or not course_name.strip():
+            return "❌ Please provide the course name to look up."
+
+        students, error = await self._get_filtered_students(child_name)
+        if error:
+            return error
+
+        client = self._get_client()
+        results = []
+        errors = []
+
+        for student in students:
+            courses, err = await self._get_filtered_courses(student, course_name)
+            if err:
+                errors.append(err)
+                continue
+            for course in courses:
+                results.append(f"\n📖 **{course.name}** ({student.name})")
+                syllabus = course.syllabus_body
+                description = course.public_description
+                if not syllabus and not description:
+                    try:
+                        detail = await client.course(course.id)
+                        syllabus = detail.syllabus_body
+                        description = detail.public_description
+                    except Exception as e:
+                        errors.append(f"Error fetching syllabus for {course.name}: {e}")
+                text = self._strip_html(syllabus, max_len=2000) or self._strip_html(
+                    description, max_len=2000
+                )
+                if text:
+                    results.append(text)
+                else:
+                    results.append("  ℹ️ No syllabus or description has been published for this course.")
+
+        if errors:
+            results.append("\n⚠️ **Some data could not be retrieved:**")
+            results.extend(f"  - {e}" for e in errors)
+        return "\n".join(results)
+    async def get_teachers(self, child_name: str = "", course_name: str = "") -> str:
+        """
+        List the teachers for each of a child's courses with contact details (email if visible).
+        Use for "who teaches X's science class?" or "how do I contact X's teacher?"
+
+        :param child_name: Optional name of a specific child. Leave empty for all children.
+        :param course_name: Optional course name to limit results to one class.
+        """
+        students, error = await self._get_filtered_students(child_name)
+        if error:
+            return error
+
+        client = self._get_client()
+        results = []
+        errors = []
+
+        for student in students:
+            results.append(f"\n🧑‍🏫 **Teachers for {student.name}**")
+            courses, err = await self._get_filtered_courses(student, course_name)
+            if err:
+                errors.append(err)
+                continue
+            for course in courses:
+                try:
+                    teachers = await client.teachers(course.id)
+                except Exception as e:
+                    errors.append(f"Error fetching teachers for {course.name}: {e}")
+                    continue
+                results.append(f"  📘 **{course.name}**:")
+                if not teachers:
+                    results.append("    ℹ️ No teacher information visible.")
+                    continue
+                for t in teachers:
+                    email = f" — {t.email}" if t.email else " (email not visible to parents)"
+                    results.append(f"    • {t.name}{email}")
+
+        if errors:
+            results.append("\n⚠️ **Some data could not be retrieved:**")
+            results.extend(f"  - {e}" for e in errors)
+        return "\n".join(results)
+
+    async def get_module_progress(self, child_name: str = "", course_name: str = "") -> str:
+        """
+        Show each child's progress through course modules/units (completed, in progress, locked).
+        Use for "is X keeping up with the coursework?" or "how far along is X in the unit?"
+
+        :param child_name: Optional name of a specific child. Leave empty for all children.
+        :param course_name: Optional course name to limit results to one class.
+        """
+        students, error = await self._get_filtered_students(child_name)
+        if error:
+            return error
+
+        client = self._get_client()
+        state_icons = {"completed": "✅", "started": "🔄", "unlocked": "⬜", "locked": "🔒"}
+        results = []
+        errors = []
+
+        for student in students:
+            results.append(f"\n📚 **Module Progress for {student.name}**")
+            courses, err = await self._get_filtered_courses(student, course_name)
+            if err:
+                errors.append(err)
+                continue
+            for course in courses:
+                try:
+                    modules = await client.modules(course.id, student.id)
+                except Exception as e:
+                    errors.append(f"Error fetching modules for {course.name}: {e}")
+                    continue
+                if not modules:
+                    continue
+                results.append(f"  📘 **{course.name}**:")
+                completed = sum(1 for m in modules if m.state == "completed")
+                results.append(f"    Progress: {completed}/{len(modules)} modules completed")
+                for m in sorted(modules, key=lambda x: x.position or 0):
+                    icon = state_icons.get(m.state or "", "⬜")
+                    count = f" ({m.items_count} items)" if m.items_count else ""
+                    done = (
+                        f" — completed {self._fmt_dt(m.completed_at, with_time=False)}"
+                        if m.completed_at
+                        else ""
+                    )
+                    results.append(f"    {icon} {m.name}{count}{done}")
+
+        if errors:
+            results.append("\n⚠️ **Some data could not be retrieved:**")
+            results.extend(f"  - {e}" for e in errors)
+        return "\n".join(results)
+    async def get_recent_activity(self, hours_back: int = 24) -> str:
+        """
+        Get a chronological feed of recent Canvas activity across all children:
+        new grades, announcements, submissions, discussions, and messages.
+        Use for "what happened today?" or "give me a quick Canvas update."
+
+        :param hours_back: How many hours of activity to show (default: 24)
+        """
+        client = self._get_client()
+        try:
+            items = await client.activity_stream()
+        except Exception as e:
+            return f"❌ Error fetching activity stream: {e}"
+
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=hours_back)
+        recent = []
+        for item in items:
+            dt = self._parse_date(item.updated_at or item.created_at)
+            if dt and dt >= cutoff:
+                recent.append((dt, item))
+
+        if not recent:
+            return f"ℹ️ No Canvas activity in the last {hours_back} hours."
+
+        type_icons = {
+            "Announcement": "📢",
+            "Submission": "📝",
+            "DiscussionTopic": "💬",
+            "Conversation": "✉️",
+            "Message": "✉️",
+            "Conference": "🎥",
+            "Collaboration": "🤝",
+            "AssessmentRequest": "📋",
+        }
+        lines = [f"🕐 **Canvas activity in the last {hours_back} hours:**"]
+        for dt, item in sorted(recent, key=lambda x: x[0], reverse=True):
+            icon = type_icons.get(item.type or "", "•")
+            title = item.title or "(no title)"
+            lines.append(f"  {icon} [{dt.strftime('%b %d %I:%M %p')}] **{title}**")
+            msg = self._strip_html(item.message, max_len=200)
+            if msg:
+                lines.append(f"      {msg}")
+        return "\n".join(lines)
+
+    async def get_daily_summary(self, child_name: str = "") -> str:
+        """
+        One-stop daily dashboard: combines current grades, work due in the next 3 days,
+        missing assignments, and yesterday-to-now activity for each child.
+        Use for open-ended requests like "how are the kids doing?" or "morning Canvas report."
+
+        :param child_name: Optional name of a specific child. Leave empty for all children.
+        """
+        sections = await asyncio.gather(
+            self.get_current_grades(child_name),
+            self.get_upcoming_assignments(days_ahead=3, child_name=child_name),
+            self.get_missing_assignments(child_name),
+            self.get_recent_activity(hours_back=24),
+            return_exceptions=True,
+        )
+        headers = (
+            "═══ 📊 CURRENT GRADES ═══",
+            "═══ 📅 DUE IN THE NEXT 3 DAYS ═══",
+            "═══ 🚨 MISSING WORK ═══",
+            "═══ 🕐 LAST 24 HOURS ═══",
+        )
+        parts = []
+        for header, section in zip(headers, sections):
+            parts.append(f"\n{header}")
+            if isinstance(section, Exception):
+                parts.append(f"⚠️ This section failed: {section}")
+            else:
+                parts.append(section)
+        return "\n".join(parts)
+
