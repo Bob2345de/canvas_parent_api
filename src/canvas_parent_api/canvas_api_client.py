@@ -76,55 +76,42 @@ class CanvasApiClient():
 
     async def get_observees(self) -> list[ObserveeResponse]:
         """Get Canvas Observees (students)."""
-        response = await self._get_request("users/self/observees")
-        parsed_json = await response.json()
-        next = MultiDict(response.links.get('next', ''))
-        if next:
-            nextpage = await self._get_request(str(next.get('url')).replace(self._base_url, ''))
-            parsed_json.extend(await nextpage.json())
-        if response:
-            return [ObserveeResponse(**resp) for resp in parsed_json]
-        return []
+        parsed_json = await self._get_paginated("users/self/observees?per_page=50")
+        return [ObserveeResponse(**resp) for resp in parsed_json]
 
-    async def get_courses(self, student_id: int) -> list[CourseResponse]:
-        """Get Canvas Courses."""
-        response = await self._get_request(f"users/{student_id}/courses?include[]=term&include[]=current_grading_period_scores&include[]=total_scores&per_page=50")
-        parsed_json = await response.json()
-        next = MultiDict(response.links.get('next', ''))
-        if next:
-            nextpage = await self._get_request(str(next.get('url')).replace(self._base_url, ''))
-            parsed_json.extend(await nextpage.json())
-        if response:
-            return [CourseResponse(**resp) for resp in parsed_json]
-        return []
+    async def get_courses(self, student_id: int, enrollment_state: str = "active") -> list[CourseResponse]:
+        """Get Canvas Courses.
+
+        By default only courses the student is actively enrolled in are returned.
+        Canvas otherwise includes concluded enrollments, which brings back courses
+        from previous school years.
+
+        :param student_id: Canvas user id of the student.
+        :param enrollment_state: 'active', 'invited_or_pending' or 'completed'.
+            Pass None/empty to let Canvas apply its own default (active + completed).
+        """
+        end_url = (
+            f"users/{student_id}/courses?include[]=term"
+            "&include[]=current_grading_period_scores&include[]=total_scores&per_page=50"
+        )
+        if enrollment_state:
+            end_url += f"&enrollment_state={enrollment_state}"
+        parsed_json = await self._get_paginated(end_url)
+        return [CourseResponse(**resp) for resp in parsed_json]
 
     async def get_assignments(self, student_id: int, course_id: int) -> list[AssignmentResponse]:
-        """Get Canvas Courses."""
-        response = await self._get_request(
+        """Get Canvas Assignments for a student in a course."""
+        parsed_json = await self._get_paginated(
             f"users/{student_id}/courses/{course_id}/assignments?include[]=submission&per_page=50"
         )
-        parsed_json = await response.json()
-        next = MultiDict(response.links.get('next', ''))
-        if next:
-            nextpage = await self._get_request(str(next.get('url')).replace(self._base_url, ''))
-            parsed_json.extend(await nextpage.json())
-        if response:
-            return [AssignmentResponse(**resp) for resp in parsed_json]
-        return []
+        return [AssignmentResponse(**resp) for resp in parsed_json]
 
     async def get_submissions(self, student_id: int, course_id: int) -> list[SubmissionResponse]:
-        """Get Canvas Courses."""
-        response = await self._get_request(
+        """Get Canvas Submissions for a student in a course."""
+        parsed_json = await self._get_paginated(
             f"courses/{course_id}/students/submissions?student_ids[]={student_id}&per_page=50"
         )
-        parsed_json = await response.json()
-        next = MultiDict(response.links.get('next', ''))
-        if next:
-            nextpage = await self._get_request(str(next.get('url')).replace(self._base_url, ''))
-            parsed_json.extend(await nextpage.json())
-        if response:
-            return [SubmissionResponse(**resp) for resp in parsed_json]
-        return []
+        return [SubmissionResponse(**resp) for resp in parsed_json]
 
     async def get_announcements(self, course_id: int, start_date: str = None, end_date: str = None) -> list[AnnouncementResponse]:
         """Get Canvas Announcements for a course."""

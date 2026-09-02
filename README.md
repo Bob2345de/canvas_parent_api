@@ -60,8 +60,14 @@ client = Canvas(base_url, api_token)
 # Students
 await client.observees()
 
-# Courses for a student
+# Courses for a student (defaults to currently active enrollments only)
 await client.courses(student_id)
+
+# Past / finished courses from previous school years.
+# enrollment_state accepts "active", "invited_or_pending" or "completed".
+# Pass None to let Canvas apply its own default, which mixes active and
+# concluded enrollments and therefore returns previous school years too.
+await client.courses(student_id, enrollment_state="completed")
 
 # Single course incl. syllabus_body / public_description
 await client.course(course_id)
@@ -98,6 +104,10 @@ await client.activity_stream(only_active_courses=True)
 Note: Attendance (Roll Call) is not available through the public Canvas REST API (it is a separate LTI tool), so it is not supported by this module.
 
 ### Patch Notes
+
+ - 0.0.25:
+	- `courses()` now defaults to `enrollment_state="active"` so concluded enrollments from previous school years are no longer returned; pass `enrollment_state="completed"` for past courses or `None` for the Canvas default
+	- Observees, Courses, Assignments and Submissions now follow every pagination page instead of only the first two
 
  - 0.0.24:
 	- Added Announcements, Calendar Events, single Assignment details, Assignment Groups, single Course (syllabus), Teachers, Modules (progress), and Activity Stream endpoints

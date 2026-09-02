@@ -1,8 +1,8 @@
 """
 title: Canvas Parent Monitor
-description: Complete parent dashboard for Canvas LMS (school data for Niclas and Annabelle). List each child's courses, upcoming/missing/completed assignments, current grades, grades by category, teacher announcements, school calendar events, assignment details with feedback, course syllabus, teacher contacts, module progress, and recent activity.
+description: Complete parent dashboard for Canvas LMS (school data for Niclas and Annabelle). List each child's current courses and past course history, upcoming/missing/completed assignments, current grades, grades by category, teacher announcements, school calendar events, assignment details with feedback, course syllabus, teacher contacts, module progress, and recent activity.
 author: Your Name
-version: 0.2.1
+version: 0.2.2
 requirements: canvas_parent_api @ https://github.com/Bob2345de/canvas_parent_api/archive/refs/heads/master.zip
 """
 
@@ -167,14 +167,19 @@ class Tools:
 
         return students, None
 
-    async def _get_filtered_courses(self, student, course_name: str = "") -> tuple:
+    async def _get_filtered_courses(
+        self, student, course_name: str = "", enrollment_state: str = "active"
+    ) -> tuple:
         """
         Fetch a student's courses, optionally filtered by course_name substring.
         Returns (courses, error_message); courses is None on error.
+
+        enrollment_state defaults to "active" so only the current school year is
+        returned; pass "completed" for previous school years.
         """
         client = self._get_client()
         try:
-            courses = await client.courses(student.id)
+            courses = await client.courses(student.id, enrollment_state=enrollment_state)
         except Exception as e:
             return None, f"Error fetching courses for {student.name}: {e}"
 
@@ -254,10 +259,16 @@ class Tools:
 
     async def list_courses(self, child_name: str = "") -> str:
         """
-        List the courses each child is enrolled in, with course code, term, and current grade.
-        Answers questions like "what classes does X have?" or "what is X's grade in each class?"
+        List the courses a child is enrolled in RIGHT NOW (the current school year),
+        with course code, term, and current grade. Concluded courses from previous
+        school years are deliberately excluded.
+        Answers questions like "what classes does Annabelle have?", "what courses is
+        Niclas taking this year?" or "what is X's grade in each class?"
 
-        :param child_name: Optional name of a specific child. Leave empty for all children.
+        DO NOT USE for past school years - use canvas_get_past_courses instead.
+
+        :param child_name: Optional name of a specific child (e.g. "Niclas" or "Annabelle").
+            Leave empty for all children.
         """
         students, error = await self._get_filtered_students(child_name)
         if error:
@@ -282,6 +293,73 @@ class Tools:
                 results.append(
                     f"  📘 **{course.name}**{code}{term} — Current grade: {self._enrollment_grade(course)}"
                 )
+
+        if errors:
+            results.append("\n⚠️ **Some data could not be retrieved:**")
+            results.extend(f"  - {e}" for e in errors)
+        return "\n".join(results)
+
+    async def canvas_get_past_courses(self, child_name: str = "", school_year: str = "") -> str:
+        """
+        List a child's PAST / finished courses from previous school years (concluded
+        enrollments), grouped by term, with the final grade for each course.
+        Answers questions like "what classes did Annabelle take last year?",
+        "what was Niclas' grade in math last semester?" or "show me her course history".
+
+        DO NOT USE for the current school year - use list_courses instead.
+
+        :param child_name: Optional name of a specific child (e.g. "Niclas" or "Annabelle").
+            Leave empty for all children.
+        :param school_year: Optional term/year filter matched against the Canvas term name,
+            e.g. "2024" or "Fall 2024". Leave empty for the full history.
+        """
+        students, error = await self._get_filtered_students(child_name)
+        if error:
+            return error
+
+        query = (school_year or "").strip().lower()
+        results = []
+        errors = []
+        for student in students:
+            results.append(f"\n🗄️ **{student.name} — Past courses**")
+            courses, err = await self._get_filtered_courses(
+                student, enrollment_state="completed"
+            )
+            if err:
+                errors.append(err)
+                continue
+
+            by_term = {}
+            for course in courses:
+                term_name = None
+                if isinstance(course.term, dict):
+                    term_name = course.term.get("name")
+                if not term_name:
+                    term_name = (
+                        f"Term {course.enrollment_term_id}"
+                        if course.enrollment_term_id
+                        else "Unknown term"
+                    )
+                if query and query not in term_name.lower():
+                    continue
+                by_term.setdefault(term_name, []).append(course)
+
+            if not by_term:
+                if query:
+                    results.append(
+                        f"  ℹ️ No past courses found for '{school_year}'."
+                    )
+                else:
+                    results.append("  ℹ️ No past courses found.")
+                continue
+
+            for term_name in sorted(by_term):
+                results.append(f"  📅 **{term_name}**")
+                for course in by_term[term_name]:
+                    code = f" ({course.course_code})" if course.course_code else ""
+                    results.append(
+                        f"    📘 {course.name}{code} — Final grade: {self._enrollment_grade(course)}"
+                    )
 
         if errors:
             results.append("\n⚠️ **Some data could not be retrieved:**")

@@ -1,5 +1,20 @@
 # Changelog
 
+[2026-09-02 17:30] - Fixed courses from previous school years appearing in "what courses does X have"
+Summary: GET /api/v1/users/:user_id/courses was called without an enrollment_state filter, and Canvas defaults to returning both active AND completed (concluded) enrollments, so last year's classes came back alongside the current ones. get_courses now sends enrollment_state=active by default, and a new canvas_get_past_courses tool method exposes the history separately so the LLM can still answer "what did she take last year?". Also fixed a latent pagination bug where only the first two pages were ever fetched.
+
+Files changed:
+
+src/canvas_parent_api/canvas_api_client.py — get_courses gained an enrollment_state parameter (default "active") appended to the query string; pass None for the old Canvas default. get_courses, get_observees, get_assignments and get_submissions now use the existing _get_paginated helper instead of manually fetching only page 1 plus one next page, which silently truncated results at 100 items.
+
+src/canvas_parent_api/canvas.py — Canvas.courses(student_id, enrollment_state="active") threads the new argument through to the API client.
+
+Canvas Parent Monitor.json — _get_filtered_courses gained an enrollment_state argument defaulting to "active", so all existing tool methods now see only current-year courses. Added new canvas_get_past_courses(child_name, school_year) tool method that lists concluded courses grouped by term with final grades, with an optional school_year substring filter. list_courses docstring now states it covers only the current school year and points at canvas_get_past_courses for history. Header description mentions past course history; version 0.2.1 -> 0.2.2.
+
+pyproject.toml, setup.py — library version 0.0.24 -> 0.0.25 so Open WebUI installs a distinct build from the GitHub archive URL.
+
+README.md — documented the enrollment_state argument on client.courses() and added 0.0.25 patch notes.
+
 [2026-09-02 15:30] - Renamed calendar tool method to canvas_get_calendar_events to avoid Exchange tool collision
 Summary: Renamed the Open WebUI tool method get_calendar_events to canvas_get_calendar_events because a separate Exchange/Outlook tool already exposes get_calendar_events, which made it ambiguous for the LLM to pick the right one. The docstring now states explicitly that this tool returns SCHOOL calendar data from Canvas for the children Niclas and Annabelle, lists example questions using their names, and adds a DO NOT USE note pointing personal/work calendar requests at the Exchange tool instead.
 

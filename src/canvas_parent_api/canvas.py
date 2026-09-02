@@ -40,9 +40,14 @@ class Canvas():
         observees = [Observee(response) for response in observeesresp]
         return observees
 
-    async def courses(self, student_id) -> list[Course]:
-        """Get Courses: must supply student id."""
-        coursesresp = await self._api_client.get_courses(student_id)
+    async def courses(self, student_id, enrollment_state: str = "active") -> list[Course]:
+        """Get Courses: must supply student id.
+
+        Defaults to currently active enrollments only. Canvas would otherwise also
+        return concluded enrollments, i.e. courses from previous school years.
+        Pass enrollment_state='completed' for past courses, or None for everything.
+        """
+        coursesresp = await self._api_client.get_courses(student_id, enrollment_state)
         courses = [Course(response) for response in coursesresp]
         return courses
 
