@@ -1,8 +1,8 @@
 """
 title: Canvas Parent Monitor
-description: Complete parent dashboard for Canvas LMS. List each child's courses, upcoming/missing/completed assignments, current grades, grades by category, teacher announcements, calendar events, assignment details with feedback, course syllabus, teacher contacts, module progress, and recent activity.
+description: Complete parent dashboard for Canvas LMS (school data for Niclas and Annabelle). List each child's courses, upcoming/missing/completed assignments, current grades, grades by category, teacher announcements, school calendar events, assignment details with feedback, course syllabus, teacher contacts, module progress, and recent activity.
 author: Your Name
-version: 0.2.0
+version: 0.2.1
 requirements: canvas_parent_api @ https://github.com/Bob2345de/canvas_parent_api/archive/refs/heads/master.zip
 """
 
@@ -590,14 +590,24 @@ class Tools:
             results.extend(f"  - {e}" for e in errors)
         return "\n".join(results)
 
-    async def get_calendar_events(self, days_ahead: int = 14, child_name: str = "") -> str:
+    async def canvas_get_calendar_events(
+        self, days_ahead: int = 14, child_name: str = ""
+    ) -> str:
         """
-        Get upcoming calendar events (tests, field trips, meetings, school events) for each child.
-        This covers scheduled events beyond regular assignments.
-        Use for "what's on X's calendar?" or "anything happening at school soon?"
+        Get upcoming SCHOOL calendar events from Canvas LMS for the children
+        Niclas and Annabelle: tests, quizzes, field trips, parent meetings,
+        school holidays, and other scheduled school events beyond regular assignments.
+
+        USE THIS TOOL when the question is about school, class, or a child by name, e.g.
+        "what's on Niclas's school calendar?", "does Annabelle have a test coming up?",
+        "anything happening at school in the next two weeks?", "any field trips soon?"
+
+        DO NOT USE for the user's own personal or work calendar, Outlook/Exchange
+        appointments, or meetings the parent is attending. Use the separate Exchange
+        calendar tool (get_calendar_events) for those.
 
         :param days_ahead: How many days ahead to look (default: 14)
-        :param child_name: Optional name of a specific child. Leave empty for all children.
+        :param child_name: Optional child to limit results to - either "Niclas" or "Annabelle". Leave empty to get school calendar events for both children.
         """
         students, error = await self._get_filtered_students(child_name)
         if error:

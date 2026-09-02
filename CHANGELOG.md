@@ -1,5 +1,12 @@
 # Changelog
 
+[2026-09-02 15:30] - Renamed calendar tool method to canvas_get_calendar_events to avoid Exchange tool collision
+Summary: Renamed the Open WebUI tool method get_calendar_events to canvas_get_calendar_events because a separate Exchange/Outlook tool already exposes get_calendar_events, which made it ambiguous for the LLM to pick the right one. The docstring now states explicitly that this tool returns SCHOOL calendar data from Canvas for the children Niclas and Annabelle, lists example questions using their names, and adds a DO NOT USE note pointing personal/work calendar requests at the Exchange tool instead.
+
+Files changed:
+
+Canvas Parent Monitor.json — renamed get_calendar_events to canvas_get_calendar_events; rewrote its docstring with Niclas/Annabelle school-calendar scope, positive/negative usage guidance, and child_name values; header description now says "school data for Niclas and Annabelle" and "school calendar events"; version 0.2.0 -> 0.2.1. The internal client.calendar_events(...) library call was intentionally left unchanged.
+
 [2026-08-31 15:00] - Fixed "can't compare offset-naive and offset-aware datetimes" in calendar/date handling
 Summary: Tools._parse_date in the Open WebUI tool could return a timezone-naive datetime when Canvas sent a date string without a UTC offset (e.g., date-only values for all-day calendar events), which then blew up when compared against timezone-aware datetime.now(timezone.utc). The parser now assumes UTC and attaches tzinfo to any naive result, so all date comparisons (calendar events, upcoming/missing/completed assignments, recent grades, activity stream) are safe.
 
