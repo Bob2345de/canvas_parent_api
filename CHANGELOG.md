@@ -1,5 +1,12 @@
 # Changelog
 
+[2026-09-03 11:15] - Pinned Open WebUI tool to a commit archive to force a fresh library install
+Summary: Fixed the runtime error "Canvas.courses() got an unexpected keyword argument 'enrollment_state'" (and the follow-on missing course_todo/todo methods), which was caused by Open WebUI serving a STALE cached install of canvas_parent_api from the unchanging master.zip URL even though origin/master already contained the 0.0.26 code. Changed the requirements URL from the branch archive (master.zip) to a commit-pinned archive so pip/Open WebUI treats it as a new dependency and re-downloads the current build; verified the commit archive resolves to a valid zip.
+
+Files changed:
+
+Canvas Parent Monitor.json — requirements line now points at https://github.com/Bob2345de/canvas_parent_api/archive/f6ea7f3d468add038e9f891e41893fa7886cc82e.zip (commit-pinned) instead of the cached refs/heads/master.zip; tool version 0.2.3 -> 0.2.4. No tool logic changed; the source already had enrollment_state, todo() and course_todo().
+
 [2026-09-03 10:00] - Added Canvas To-Do List support (global and course-specific) plus a child-name tool
 Summary: Added the two Canvas To-Do endpoints the user requested - the global list across all courses (GET /api/v1/users/:user_id/todo) and the course-specific list (GET /api/v1/courses/:course_id/todo) - following the existing 4-layer pattern, and exposed them to the LLM through a new canvas_get_todo(child_name, course_name) Open WebUI tool that shows each child's outstanding assignments/quizzes grouped by course and ordered by due date.
 

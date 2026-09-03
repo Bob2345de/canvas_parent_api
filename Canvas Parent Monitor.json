@@ -2,8 +2,8 @@
 title: Canvas Parent Monitor
 description: Complete parent dashboard for Canvas LMS (school data for Niclas and Annabelle). List each child's current courses and past course history, upcoming/missing/completed assignments, current grades, grades by category, teacher announcements, school calendar events, assignment details with feedback, course syllabus, teacher contacts, module progress, the to-do list of outstanding work, and recent activity.
 author: Your Name
-version: 0.2.3
-requirements: canvas_parent_api @ https://github.com/Bob2345de/canvas_parent_api/archive/refs/heads/master.zip
+version: 0.2.4
+requirements: canvas_parent_api @ https://github.com/Bob2345de/canvas_parent_api/archive/f6ea7f3d468add038e9f891e41893fa7886cc82e.zip
 """
 
 import asyncio
