@@ -20,6 +20,7 @@ from .models.base import (
     TeacherResponse,
     ModuleResponse,
     ActivityStreamItemResponse,
+    TodoItemResponse,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -178,3 +179,13 @@ class CanvasApiClient():
             end_url += "&only_active_courses=true"
         parsed_json = await self._get_paginated(end_url)
         return [ActivityStreamItemResponse(**resp) for resp in parsed_json]
+
+    async def get_todo(self, user_id="self") -> list[TodoItemResponse]:
+        """Get the global Canvas To-Do list for a user (defaults to self)."""
+        parsed_json = await self._get_paginated(f"users/{user_id}/todo?per_page=50")
+        return [TodoItemResponse(**resp) for resp in parsed_json]
+
+    async def get_course_todo(self, course_id: int) -> list[TodoItemResponse]:
+        """Get the Canvas To-Do list scoped to a single course."""
+        parsed_json = await self._get_paginated(f"courses/{course_id}/todo?per_page=50")
+        return [TodoItemResponse(**resp) for resp in parsed_json]

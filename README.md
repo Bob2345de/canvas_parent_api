@@ -11,6 +11,7 @@ The types of objects that can be returned include:
  - Assignment Groups (grade categories)
  - Teachers
  - Modules (with progress)
+ - To-Do Items (outstanding assignments/quizzes)
  - Activity Stream (recent activity feed)
 
 This module is provided for use with the Home Assistant custom integration [Canvas](https://github.com/schwartzpub/canvas_hassio) however it could be useful as a standalone module for your own projects as well.
@@ -99,11 +100,21 @@ await client.modules(course_id, student_id)
 
 # Recent activity feed for the current (parent) user
 await client.activity_stream(only_active_courses=True)
+
+# Global To-Do list (across all courses) for a user (defaults to the parent)
+await client.todo()
+await client.todo(student_id)
+
+# To-Do list scoped to a single course
+await client.course_todo(course_id)
 ```
 
 Note: Attendance (Roll Call) is not available through the public Canvas REST API (it is a separate LTI tool), so it is not supported by this module.
 
 ### Patch Notes
+
+ - 0.0.26:
+	- Added To-Do List endpoints: `todo()` (global, across all courses, `GET /api/v1/users/:user_id/todo`) and `course_todo(course_id)` (course-specific, `GET /api/v1/courses/:course_id/todo`)
 
  - 0.0.25:
 	- `courses()` now defaults to `enrollment_state="active"` so concluded enrollments from previous school years are no longer returned; pass `enrollment_state="completed"` for past courses or `None` for the Canvas default

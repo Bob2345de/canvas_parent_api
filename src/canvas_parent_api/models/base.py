@@ -201,6 +201,26 @@ class ModuleResponse(BaseModel):
     published: Optional[bool] = Field(None)
 
 
+class TodoItemResponse(BaseModel):
+    """To-Do Item Response Definition.
+
+    Canvas returns to-do items without an 'id' field; the payload wraps either an
+    assignment or a quiz, so every field is optional.
+    """
+    type: Optional[str] = Field(None)
+    assignment: Optional[dict] = Field(None)
+    quiz: Optional[dict] = Field(None)
+    ignore: Optional[str] = Field(None)
+    ignore_permanently: Optional[str] = Field(None)
+    html_url: Optional[str] = Field(None)
+    needs_grading_count: Optional[int] = Field(None)
+    context_type: Optional[str] = Field(None)
+    course_id: Optional[int] = Field(None)
+    group_id: Optional[int] = Field(None)
+    context_name: Optional[str] = Field(None)
+    visible_in_planner: Optional[bool] = Field(None)
+
+
 class ActivityStreamItemResponse(BaseModel):
     """Activity Stream Item Response Definition."""
     id: int

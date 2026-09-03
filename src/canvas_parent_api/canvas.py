@@ -14,6 +14,7 @@ from .models.assignment_group import AssignmentGroup
 from .models.teacher import Teacher
 from .models.module import Module
 from .models.activity_stream_item import ActivityStreamItem
+from .models.todo_item import TodoItem
 from .canvas_api_client import CanvasApiClient
 
 _LOGGER = logging.getLogger(__name__)
@@ -114,3 +115,17 @@ class Canvas():
         activityresp = await self._api_client.get_activity_stream(only_active_courses)
         activity = [ActivityStreamItem(response) for response in activityresp]
         return activity
+
+    async def todo(self, user_id="self") -> list[TodoItem]:
+        """Get the global To-Do list (across all courses) for a user.
+
+        Defaults to the authenticated (parent) user. Pass a student's Canvas
+        user id to fetch that student's to-do items where permitted.
+        """
+        todoresp = await self._api_client.get_todo(user_id)
+        return [TodoItem(response) for response in todoresp]
+
+    async def course_todo(self, course_id) -> list[TodoItem]:
+        """Get the To-Do list scoped to a single course: must supply course id."""
+        todoresp = await self._api_client.get_course_todo(course_id)
+        return [TodoItem(response) for response in todoresp]
