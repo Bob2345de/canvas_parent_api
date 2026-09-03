@@ -180,8 +180,14 @@ class CanvasApiClient():
         parsed_json = await self._get_paginated(end_url)
         return [ActivityStreamItemResponse(**resp) for resp in parsed_json]
 
-    async def get_todo(self, user_id="self") -> list[TodoItemResponse]:
-        """Get the global Canvas To-Do list for a user (defaults to self)."""
+    async def get_todo(self, user_id) -> list[TodoItemResponse]:
+        """Get the Canvas To-Do list for a specific user id.
+
+        Calls GET /api/v1/users/{user_id}/todo. A concrete user id is required;
+        passing 'self' is rejected so this never targets the authenticated user.
+        """
+        if user_id is None or str(user_id).strip().lower() == "self":
+            raise ValueError("get_todo requires a concrete student user_id, not 'self'")
         parsed_json = await self._get_paginated(f"users/{user_id}/todo?per_page=50")
         return [TodoItemResponse(**resp) for resp in parsed_json]
 

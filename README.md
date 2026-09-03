@@ -101,8 +101,9 @@ await client.modules(course_id, student_id)
 # Recent activity feed for the current (parent) user
 await client.activity_stream(only_active_courses=True)
 
-# Global To-Do list (across all courses) for a user (defaults to the parent)
-await client.todo()
+# To-Do list (across all courses) for a specific student.
+# GET /api/v1/users/{student_id}/todo — a concrete user id is required
+# ('self' is intentionally rejected).
 await client.todo(student_id)
 
 # To-Do list scoped to a single course
@@ -112,6 +113,9 @@ await client.course_todo(course_id)
 Note: Attendance (Roll Call) is not available through the public Canvas REST API (it is a separate LTI tool), so it is not supported by this module.
 
 ### Patch Notes
+
+ - 0.0.27:
+	- `todo(user_id)` now requires a concrete student user id (calls `GET /api/v1/users/{user_id}/todo`); `'self'` is rejected so the to-do list always targets a specific student
 
  - 0.0.26:
 	- Added To-Do List endpoints: `todo()` (global, across all courses, `GET /api/v1/users/:user_id/todo`) and `course_todo(course_id)` (course-specific, `GET /api/v1/courses/:course_id/todo`)

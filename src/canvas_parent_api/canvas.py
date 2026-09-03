@@ -116,11 +116,12 @@ class Canvas():
         activity = [ActivityStreamItem(response) for response in activityresp]
         return activity
 
-    async def todo(self, user_id="self") -> list[TodoItem]:
-        """Get the global To-Do list (across all courses) for a user.
+    async def todo(self, user_id) -> list[TodoItem]:
+        """Get the To-Do list (across all courses) for a specific user.
 
-        Defaults to the authenticated (parent) user. Pass a student's Canvas
-        user id to fetch that student's to-do items where permitted.
+        A concrete Canvas user id is required (e.g. a student's id); this method
+        deliberately does not accept 'self' so callers always target a specific
+        student rather than the authenticated account.
         """
         todoresp = await self._api_client.get_todo(user_id)
         return [TodoItem(response) for response in todoresp]

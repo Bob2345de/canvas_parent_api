@@ -2,8 +2,8 @@
 title: Canvas Parent Monitor
 description: Complete parent dashboard for Canvas LMS (school data for Niclas and Annabelle). List each child's current courses and past course history, upcoming/missing/completed assignments, current grades, grades by category, teacher announcements, school calendar events, assignment details with feedback, course syllabus, teacher contacts, module progress, the to-do list of outstanding work, and recent activity.
 author: Your Name
-version: 0.2.4
-requirements: canvas_parent_api @ https://github.com/Bob2345de/canvas_parent_api/archive/f6ea7f3d468add038e9f891e41893fa7886cc82e.zip
+version: 0.2.5
+requirements: canvas_parent_api @ https://github.com/Bob2345de/canvas_parent_api/archive/refs/heads/master.zip
 """
 
 import asyncio
@@ -1059,6 +1059,21 @@ class Tools:
                 lines.append(f"      {msg}")
         return "\n".join(lines)
 
+    @staticmethod
+    def _todo_course_label(item) -> str:
+        """Best-effort course name for a to-do item from GET /users/:id/todo."""
+        label = getattr(item, "context_name", None)
+        if label:
+            return label
+        payload = getattr(item, "assignment", None) or getattr(item, "quiz", None)
+        if isinstance(payload, dict):
+            course = payload.get("course")
+            if isinstance(course, dict) and course.get("name"):
+                return course["name"]
+            if payload.get("context_name"):
+                return payload["context_name"]
+        return "Other"
+
     async def canvas_get_todo(self, child_name: str = "", course_name: str = "") -> str:
         """
         Get each child's Canvas To-Do list — the assignments and quizzes that still
@@ -1067,8 +1082,9 @@ class Tools:
         Use for questions like "what does Niclas still have to do?", "what is on
         Annabelle's to-do list?" or "what work is left in her math class?".
 
-        This reads the course-scoped to-do endpoint for each of the child's current
-        courses, so it reflects outstanding work per class.
+        This calls the per-student to-do endpoint (GET /api/v1/users/{student_id}/todo)
+        using each child's own Canvas user id, which returns their outstanding work
+        across all of their courses in a single request.
 
         :param child_name: Optional name of a specific child (e.g. "Niclas" or "Annabelle").
             Leave empty for all children.
@@ -1079,38 +1095,42 @@ class Tools:
             return error
 
         client = self._get_client()
+        course_query = (course_name or "").strip().lower()
         results = []
         errors = []
 
         for student in students:
             results.append(f"\n📝 **To-Do list for {student.name}**")
-            courses, err = await self._get_filtered_courses(student, course_name)
-            if err:
-                errors.append(err)
+            try:
+                todos = await client.todo(student.id)
+            except Exception as e:
+                errors.append(f"Error fetching to-do for {student.name}: {e}")
                 continue
 
-            found_any = False
-            for course in courses:
-                try:
-                    todos = await client.course_todo(course.id)
-                except Exception as e:
-                    errors.append(f"Error fetching to-do items for {course.name}: {e}")
+            by_course = {}
+            for item in todos:
+                label = self._todo_course_label(item)
+                if course_query and course_query not in label.lower():
                     continue
-                if not todos:
-                    continue
+                by_course.setdefault(label, []).append(item)
 
-                found_any = True
-                results.append(f"  📘 **{course.name}**:")
+            if not by_course:
+                results.append("  ✅ Nothing on the to-do list — all caught up!")
+                continue
+
+            for label in sorted(by_course):
+                results.append(f"  📘 **{label}**:")
                 for item in sorted(
-                    todos,
+                    by_course[label],
                     key=lambda t: self._parse_date(t.due_at) or datetime.max.replace(tzinfo=timezone.utc),
                 ):
                     name = item.name or "(untitled)"
-                    kind = "📄 Quiz" if item.type == "grading" and item.quiz else "📄"
                     if item.quiz and not item.assignment:
                         kind = "❓ Quiz"
                     elif item.type == "submitting":
                         kind = "✏️ Assignment"
+                    else:
+                        kind = "📄"
                     pts = f" ({item.points_possible} pts)" if item.points_possible else ""
                     due = (
                         f" — Due: {self._fmt_dt(item.due_at)}"
@@ -1118,9 +1138,6 @@ class Tools:
                         else " — No due date"
                     )
                     results.append(f"    • {kind}: **{name}**{pts}{due}")
-
-            if not found_any:
-                results.append("  ✅ Nothing on the to-do list — all caught up!")
 
         if errors:
             results.append("\n⚠️ **Some data could not be retrieved:**")

@@ -1,5 +1,20 @@
 # Changelog
 
+[2026-09-03 12:30] - canvas_get_todo now calls GET /users/{student_id}/todo directly (no courses()/enrollment_state)
+Summary: Fixed the persistent "Canvas.courses() got an unexpected keyword argument 'enrollment_state'" crash by removing the to-do tool's dependency on the course list entirely. canvas_get_todo now resolves each child via observees and calls client.todo(student.id) — i.e. GET /api/v1/users/{student_id}/todo with the child's own Canvas user id — so it no longer touches courses(), enrollment_state, or the per-course /courses/:id/todo endpoint. The library todo() was tightened to require a concrete user id and to reject 'self' so the code can never hit /users/self/todo. Verified with an end-to-end simulation that courses() is never called and the correct student ids are used.
+
+Files changed:
+
+Canvas Parent Monitor.json — rewrote canvas_get_todo to call client.todo(student.id) (GET /users/{student_id}/todo) and group/sort results in memory via a new _todo_course_label helper; dropped all _get_filtered_courses/course_todo/enrollment_state usage from this tool path; course_name is now an in-memory filter on each item's course context. Tool version 0.2.4 -> 0.2.5; requirements URL back to master.zip.
+
+src/canvas_parent_api/canvas.py — todo(user_id) no longer defaults to 'self'; requires an explicit user id.
+
+src/canvas_parent_api/canvas_api_client.py — get_todo(user_id) raises ValueError if user_id is None or 'self', guaranteeing the client never requests /users/self/todo.
+
+pyproject.toml, setup.py — library version 0.0.26 -> 0.0.27.
+
+README.md — documented that todo(user_id) requires a concrete student id (self rejected); added 0.0.27 patch notes.
+
 [2026-09-03 11:15] - Pinned Open WebUI tool to a commit archive to force a fresh library install
 Summary: Fixed the runtime error "Canvas.courses() got an unexpected keyword argument 'enrollment_state'" (and the follow-on missing course_todo/todo methods), which was caused by Open WebUI serving a STALE cached install of canvas_parent_api from the unchanging master.zip URL even though origin/master already contained the 0.0.26 code. Changed the requirements URL from the branch archive (master.zip) to a commit-pinned archive so pip/Open WebUI treats it as a new dependency and re-downloads the current build; verified the commit archive resolves to a valid zip.
 
