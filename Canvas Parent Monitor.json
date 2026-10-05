@@ -2,7 +2,7 @@
 title: Canvas Parent Monitor
 description: Complete parent dashboard for Canvas LMS (school data for Niclas and Annabelle). List each child's current courses and past course history, upcoming/missing/completed assignments, current grades, grades by category, teacher announcements, school calendar events, assignment details with feedback, course syllabus, teacher contacts, module progress, the to-do list of outstanding work, and recent activity.
 author: Your Name
-version: 0.2.5
+version: 0.3.0
 requirements: canvas_parent_api @ https://github.com/Bob2345de/canvas_parent_api/archive/refs/heads/master.zip
 """
 
@@ -24,37 +24,110 @@ class Tools:
         )
         CANVAS_API_TOKEN: str = Field(
             default="",
-            description="Your Canvas Parent API Token (generated in Account → Settings)",
+            description=(
+                "Your Canvas PARENT API Token (generated in the parent's Account → "
+                "Settings). This is only used to look up which children are linked to "
+                "the parent account (their user ids/names) and for the recent-activity "
+                "feed. All other data is fetched with each child's own token below."
+            ),
             json_schema_extra={"input": {"type": "password"}},
         )
         CHILD_1_NAME: str = Field(
             default="",
             description="First child's name as it appears in Canvas (leave blank to fetch all children)",
         )
+        CHILD_1_TOKEN: str = Field(
+            default="",
+            description=(
+                "First child's OWN Canvas API Token (generated from that child's "
+                "Account → Settings). Used for every per-child request except looking "
+                "up children and the recent-activity feed."
+            ),
+            json_schema_extra={"input": {"type": "password"}},
+        )
         CHILD_2_NAME: str = Field(
             default="",
             description="Second child's name as it appears in Canvas (leave blank if you only have one child)",
+        )
+        CHILD_2_TOKEN: str = Field(
+            default="",
+            description="Second child's OWN Canvas API Token (leave blank if you only have one child).",
+            json_schema_extra={"input": {"type": "password"}},
         )
         CHILD_3_NAME: str = Field(
             default="",
             description="Third child's name as it appears in Canvas (leave blank if not needed)",
         )
+        CHILD_3_TOKEN: str = Field(
+            default="",
+            description="Third child's OWN Canvas API Token (leave blank if not needed).",
+            json_schema_extra={"input": {"type": "password"}},
+        )
 
     def __init__(self):
         self.valves = self.Valves()
-        self._client: Optional[Canvas] = None
-        self._client_key: Optional[tuple] = None
+        # Cached Canvas clients keyed by (base_url, token) so each distinct token
+        # (the parent token and every child token) gets its own cached client.
+        self._clients: dict = {}
 
     # ------------------------------------------------------------------
     # Helper methods (internal, not exposed to the LLM)
     # ------------------------------------------------------------------
-    def _get_client(self) -> Canvas:
-        """Return a cached Canvas client, rebuilt if valve settings changed."""
-        key = (self.valves.CANVAS_BASE_URL, self.valves.CANVAS_API_TOKEN)
-        if self._client is None or self._client_key != key:
-            self._client = Canvas(key[0], key[1])
-            self._client_key = key
-        return self._client
+    def _get_client(self, token: str) -> Canvas:
+        """Return a cached Canvas client for the given token, keyed by (base_url, token)."""
+        key = (self.valves.CANVAS_BASE_URL, token)
+        client = self._clients.get(key)
+        if client is None:
+            client = Canvas(key[0], key[1])
+            self._clients[key] = client
+        return client
+
+    def _get_parent_client(self) -> Canvas:
+        """Return the Canvas client built from the PARENT token.
+
+        The parent token is only used to resolve which children are linked to the
+        account (observees -> user ids/names) and for the recent-activity feed.
+        """
+        return self._get_client(self.valves.CANVAS_API_TOKEN)
+
+    def _child_slots(self) -> List[tuple]:
+        """Return (name, token) pairs for every configured child slot with a name."""
+        slots = []
+        for name_attr, token_attr in (
+            ("CHILD_1_NAME", "CHILD_1_TOKEN"),
+            ("CHILD_2_NAME", "CHILD_2_TOKEN"),
+            ("CHILD_3_NAME", "CHILD_3_TOKEN"),
+        ):
+            name = (getattr(self.valves, name_attr, "") or "").strip()
+            token = (getattr(self.valves, token_attr, "") or "").strip()
+            if name:
+                slots.append((name, token))
+        return slots
+
+    def _token_for_student(self, student) -> tuple:
+        """Find the configured child token whose name matches this student.
+
+        Returns (token, error_message); token is None on error.
+        """
+        for name, token in self._child_slots():
+            if self._match_student(student, name):
+                if not token:
+                    return None, (
+                        f"⚠️ No Canvas API token is configured for {student.name}. "
+                        f"Add that child's own token to the matching CHILD_*_TOKEN valve."
+                    )
+                return token, None
+        return None, (
+            f"⚠️ No child token slot matches {student.name}. Add their name and own "
+            f"Canvas API token to a CHILD_*_NAME / CHILD_*_TOKEN valve pair."
+        )
+
+    def _client_for_student(self, student) -> tuple:
+        """Return (Canvas client built from the child's own token, error_message)."""
+        token, error = self._token_for_student(student)
+        if error:
+            return None, error
+        return self._get_client(token), None
 
     @staticmethod
     def _parse_date(date_str) -> Optional[datetime]:
@@ -137,8 +210,12 @@ class Tools:
         """
         Fetch observees and filter by child_name (or configured valve names).
         Returns (students, error_message); students is None on error.
+
+        This is the one place that uses the PARENT token, since looking up which
+        children are linked to the account (their user ids/names) is only possible
+        with the parent key. Every other request uses each child's own token.
         """
-        client = self._get_client()
+        client = self._get_parent_client()
         try:
             students = await client.observees()
         except Exception as e:
@@ -177,7 +254,9 @@ class Tools:
         enrollment_state defaults to "active" so only the current school year is
         returned; pass "completed" for previous school years.
         """
-        client = self._get_client()
+        client, cerr = self._client_for_student(student)
+        if cerr:
+            return None, cerr
         try:
             courses = await client.courses(student.id, enrollment_state=enrollment_state)
         except Exception as e:
@@ -207,7 +286,10 @@ class Tools:
         course_name: str = "",
     ) -> None:
         """Call callback(assignment, course) for every assignment of the student."""
-        client = self._get_client()
+        client, cerr = self._client_for_student(student)
+        if cerr:
+            error_list.append(cerr)
+            return
         courses, error = await self._get_filtered_courses(student, course_name)
         if error:
             error_list.append(error)
@@ -627,12 +709,15 @@ class Tools:
         if error:
             return error
 
-        client = self._get_client()
         results = []
         errors = []
 
         for student in students:
             results.append(f"\n📢 **Announcements for {student.name}** (last {days_back} days)")
+            client, cerr = self._client_for_student(student)
+            if cerr:
+                errors.append(cerr)
+                continue
             courses, err = await self._get_filtered_courses(student, course_name)
             if err:
                 errors.append(err)
@@ -691,12 +776,15 @@ class Tools:
         if error:
             return error
 
-        client = self._get_client()
         results = []
         errors = []
 
         for student in students:
             results.append(f"\n📅 **Calendar for {student.name}** (next {days_ahead} days)")
+            client, cerr = self._client_for_student(student)
+            if cerr:
+                errors.append(cerr)
+                continue
             try:
                 events = await client.calendar_events(student.id, days_ahead=days_ahead)
             except Exception as e:
@@ -738,12 +826,16 @@ class Tools:
         if error:
             return error
 
-        client = self._get_client()
         query = assignment_name.strip().lower()
         results = []
         errors = []
 
         for student in students:
+            client, cerr = self._client_for_student(student)
+            if cerr:
+                errors.append(cerr)
+                continue
+
             matches = []
 
             async def collect(assignment, course):
@@ -825,12 +917,15 @@ class Tools:
         if error:
             return error
 
-        client = self._get_client()
         results = []
         errors = []
 
         for student in students:
             results.append(f"\n📊 **{student.name} — Grades by Category**")
+            client, cerr = self._client_for_student(student)
+            if cerr:
+                errors.append(cerr)
+                continue
             courses, err = await self._get_filtered_courses(student, course_name)
             if err:
                 errors.append(err)
@@ -894,11 +989,14 @@ class Tools:
         if error:
             return error
 
-        client = self._get_client()
         results = []
         errors = []
 
         for student in students:
+            client, cerr = self._client_for_student(student)
+            if cerr:
+                errors.append(cerr)
+                continue
             courses, err = await self._get_filtered_courses(student, course_name)
             if err:
                 errors.append(err)
@@ -938,12 +1036,15 @@ class Tools:
         if error:
             return error
 
-        client = self._get_client()
         results = []
         errors = []
 
         for student in students:
             results.append(f"\n🧑‍🏫 **Teachers for {student.name}**")
+            client, cerr = self._client_for_student(student)
+            if cerr:
+                errors.append(cerr)
+                continue
             courses, err = await self._get_filtered_courses(student, course_name)
             if err:
                 errors.append(err)
@@ -979,13 +1080,16 @@ class Tools:
         if error:
             return error
 
-        client = self._get_client()
         state_icons = {"completed": "✅", "started": "🔄", "unlocked": "⬜", "locked": "🔒"}
         results = []
         errors = []
 
         for student in students:
             results.append(f"\n📚 **Module Progress for {student.name}**")
+            client, cerr = self._client_for_student(student)
+            if cerr:
+                errors.append(cerr)
+                continue
             courses, err = await self._get_filtered_courses(student, course_name)
             if err:
                 errors.append(err)
@@ -1023,7 +1127,9 @@ class Tools:
 
         :param hours_back: How many hours of activity to show (default: 24)
         """
-        client = self._get_client()
+        # The activity stream is the parent account's own combined feed, so this
+        # (like looking up the children) uses the PARENT token rather than a child token.
+        client = self._get_parent_client()
         try:
             items = await client.activity_stream()
         except Exception as e:
@@ -1094,13 +1200,16 @@ class Tools:
         if error:
             return error
 
-        client = self._get_client()
         course_query = (course_name or "").strip().lower()
         results = []
         errors = []
 
         for student in students:
             results.append(f"\n📝 **To-Do list for {student.name}**")
+            client, cerr = self._client_for_student(student)
+            if cerr:
+                errors.append(cerr)
+                continue
             try:
                 todos = await client.todo(student.id)
             except Exception as e:
