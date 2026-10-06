@@ -29,8 +29,9 @@ class Canvas():
         api_key,
         path: str = None,
         debug=False,
+        label: str = None,
     ):
-        self._api_client = CanvasApiClient(base_url, api_key, path, debug)
+        self._api_client = CanvasApiClient(base_url, api_key, path, debug, label)
 
         if debug:
             _LOGGER.setLevel(logging.DEBUG)

@@ -2,7 +2,7 @@
 title: Canvas Parent Monitor
 description: Complete parent dashboard for Canvas LMS (school data for Niclas and Annabelle). List each child's current courses and past course history, upcoming/missing/completed assignments, current grades, grades by category, teacher announcements, school calendar events, assignment details with feedback, course syllabus, teacher contacts, module progress, the to-do list of outstanding work, and recent activity.
 author: Your Name
-version: 0.3.0
+version: 0.3.1
 requirements: canvas_parent_api @ https://github.com/Bob2345de/canvas_parent_api/archive/refs/heads/master.zip
 """
 
@@ -73,12 +73,16 @@ class Tools:
     # ------------------------------------------------------------------
     # Helper methods (internal, not exposed to the LLM)
     # ------------------------------------------------------------------
-    def _get_client(self, token: str) -> Canvas:
-        """Return a cached Canvas client for the given token, keyed by (base_url, token)."""
+    def _get_client(self, token: str, label: str = "") -> Canvas:
+        """Return a cached Canvas client for the given token, keyed by (base_url, token).
+
+        ``label`` (e.g. the child's name or "parent") is only used to tag the
+        per-call API log entries so you can see which token made a request.
+        """
         key = (self.valves.CANVAS_BASE_URL, token)
         client = self._clients.get(key)
         if client is None:
-            client = Canvas(key[0], key[1])
+            client = Canvas(key[0], key[1], label=label)
             self._clients[key] = client
         return client
 
@@ -88,7 +92,7 @@ class Tools:
         The parent token is only used to resolve which children are linked to the
         account (observees -> user ids/names) and for the recent-activity feed.
         """
-        return self._get_client(self.valves.CANVAS_API_TOKEN)
+        return self._get_client(self.valves.CANVAS_API_TOKEN, label="parent")
 
     def _child_slots(self) -> List[tuple]:
         """Return (name, token) pairs for every configured child slot with a name."""
@@ -127,7 +131,7 @@ class Tools:
         token, error = self._token_for_student(student)
         if error:
             return None, error
-        return self._get_client(token), None
+        return self._get_client(token, label=student.name), None
 
     @staticmethod
     def _parse_date(date_str) -> Optional[datetime]:

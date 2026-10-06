@@ -1,5 +1,27 @@
 # Changelog
 
+[2026-10-06 13:15] - Per-call Canvas API request/response logging
+Summary: The backend API client now logs every HTTP request it makes to the Canvas API — the request (method, full URL, masked token, caller label) and the response (status, elapsed time, body) — with timestamps, to a text file. Default location is /app/backend/data/canvas_api.log (the Open WebUI data dir, volume-mounted to the host so it is reachable both inside the container and from the host); configurable via CANVAS_API_LOG_FILE and CANVAS_API_LOG_MAX_BODY. The tool passes a caller label (child name or "parent") so entries identify which key made the call. Library 0.0.27 -> 0.0.28, tool 0.3.0 -> 0.3.1.
+
+Files changed:
+
+src/canvas_parent_api/canvas_api_client.py — added a file-based call logger (path resolution with fallbacks, thread-safe flushed writes, masked token display, response body truncation) and wired _get_request to log REQUEST / RESPONSE / ERROR lines with timestamps; __init__ accepts label for call tagging.
+
+src/canvas_parent_api/canvas.py — Canvas.__init__ now accepts label and threads it through to CanvasApiClient.
+
+Canvas Parent Monitor.json — _get_client gains a label param; parent client is labelled "parent" and child clients are labelled with the child's name.
+
+setup.py, pyproject.toml — library version 0.0.27 -> 0.0.28 so Open WebUI installs a distinct build.
+
+README.md — patch note for 0.0.28 describing the API call log and env vars.
+
+[2026-10-06 12:00] - Per-child Canvas API tokens
+Summary: Added a CHILD_1_TOKEN / CHILD_2_TOKEN / CHILD_3_TOKEN valve next to each child's name and re-routed every per-child request (courses, assignments, grades, announcements, calendar events, assignment details, teachers, modules, syllabus, to-do) to a Canvas client built from that child's OWN token. The parent token (CANVAS_API_TOKEN) is now used only for looking up which children are linked to the account (observees → user ids/names) and for get_recent_activity, as those are the only functions that require the parent key. Clients are cached per (base_url, token); a missing child token produces a clear per-child error instead of calling the API.
+
+Files changed:
+
+Canvas Parent Monitor.json — added CHILD_1_TOKEN, CHILD_2_TOKEN, CHILD_3_TOKEN password valves; replaced the single cached client with a per-token client cache (_get_client(token), _get_parent_client, _child_slots, _token_for_student, _client_for_student); _get_filtered_students and get_recent_activity now use the parent client, while _get_filtered_courses, _process_all_assignments, canvas_get_announcements, canvas_get_calendar_events, get_assignment_details, get_grades_by_category, get_course_syllabus, get_teachers, get_module_progress and canvas_get_todo resolve each child's own client via _client_for_student. Tool version 0.2.5 -> 0.3.0.
+
 [2026-09-03 12:30] - canvas_get_todo now calls GET /users/{student_id}/todo directly (no courses()/enrollment_state)
 Summary: Fixed the persistent "Canvas.courses() got an unexpected keyword argument 'enrollment_state'" crash by removing the to-do tool's dependency on the course list entirely. canvas_get_todo now resolves each child via observees and calls client.todo(student.id) — i.e. GET /api/v1/users/{student_id}/todo with the child's own Canvas user id — so it no longer touches courses(), enrollment_state, or the per-course /courses/:id/todo endpoint. The library todo() was tightened to require a concrete user id and to reject 'self' so the code can never hit /users/self/todo. Verified with an end-to-end simulation that courses() is never called and the correct student ids are used.
 

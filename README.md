@@ -114,6 +114,10 @@ Note: Attendance (Roll Call) is not available through the public Canvas REST API
 
 ### Patch Notes
 
+ - 0.0.28:
+	- Every HTTP request to the Canvas API is now written to a text log (the call URL, masked token, caller label, response status + body, and timestamps). Default log path is `/app/backend/data/canvas_api.log` (the Open WebUI data dir, volume-mounted to the host); override with `CANVAS_API_LOG_FILE`, and cap the logged response size with `CANVAS_API_LOG_MAX_BODY` (default 20000 chars).
+	- `Canvas(base_url, api_key, ..., label="Niclas")` / `CanvasApiClient(..., label=...)` optionally tags log entries with a caller label.
+
  - 0.0.27:
 	- `todo(user_id)` now requires a concrete student user id (calls `GET /api/v1/users/{user_id}/todo`); `'self'` is rejected so the to-do list always targets a specific student
 

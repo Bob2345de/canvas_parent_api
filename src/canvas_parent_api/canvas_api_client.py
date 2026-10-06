@@ -1,7 +1,14 @@
 """Canvas API Client."""
 import json
 import logging
+import os
+import tempfile
+import threading
+import time
+import traceback
 
+from datetime import datetime
+from typing import Optional
 from urllib.parse import urljoin
 
 import aiohttp
@@ -31,6 +38,92 @@ def _enable_debug_logging():
     _LOGGER.setLevel(logging.DEBUG)
 
 
+# ---------------------------------------------------------------------------
+# Per-call request/response logging to a text file
+# ---------------------------------------------------------------------------
+# Open WebUI stores its data (incl. the volume-mount "/app/backend/data" ->
+# host "./data") here, so this path is accessible both inside the container and
+# from the host. Override with the CANVAS_API_LOG_FILE environment variable.
+_DEFAULT_API_LOG_PATH = "/app/backend/data/canvas_api.log"
+_API_LOG_MAX_BODY = int(os.environ.get("CANVAS_API_LOG_MAX_BODY", "20000"))
+
+
+def _resolve_api_log_path() -> Optional[str]:
+    """Pick the first writable path for the API call log.
+
+    Order: $CANVAS_API_LOG_FILE, the Open WebUI data dir (default, volume-mounted
+    in the Docker container), the user home dir (local runs), the system temp
+    dir. Returns None when no path is writable (call logging is then disabled).
+    """
+    candidates = []
+    env_path = (os.environ.get("CANVAS_API_LOG_FILE") or "").strip()
+    if env_path:
+        candidates.append(env_path)
+    candidates += [
+        _DEFAULT_API_LOG_PATH,
+        os.path.join(os.path.expanduser("~"), ".canvas_api.log"),
+        os.path.join(tempfile.gettempdir(), "canvas_api.log"),
+    ]
+    for path in candidates:
+        try:
+            parent = os.path.dirname(path)
+            if parent and not os.path.isdir(parent):
+                continue
+            with open(path, "a", encoding="utf-8"):
+                pass
+            return path
+        except OSError:
+            continue
+    return None
+
+
+API_LOG_PATH = _resolve_api_log_path()
+_api_log_lock = threading.Lock()
+
+
+def _api_log_line(line: str) -> None:
+    """Append one line to the API log file (best effort, thread safe, flushed)."""
+    if not API_LOG_PATH:
+        return
+    try:
+        with _api_log_lock:
+            with open(API_LOG_PATH, "a", encoding="utf-8") as fh:
+                fh.write(line + "\n")
+    except OSError:
+        pass
+
+
+def _mask_api_key(api_key: str) -> str:
+    """Show a small prefix/suffix of the key so log lines identify the token without leaking it."""
+    if not api_key:
+        return "<empty>"
+    if len(api_key) <= 12:
+        return f"{api_key[:4]}…{api_key[-2:]}"
+    return f"{api_key[:6]}…{api_key[-4:]}"
+
+
+def _now() -> str:
+    return datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+
+
+def _log_request(method: str, url: str, caller: str, masked_key: str) -> None:
+    caller_txt = f" | caller={caller}" if caller else ""
+    _api_log_line(f"{_now()} | REQUEST  | {method} {url} | token={masked_key}{caller_txt}")
+
+
+def _log_response(status: int, body: str, elapsed_ms: float, url: str) -> None:
+    if len(body) > _API_LOG_MAX_BODY:
+        body_txt = f"{body[:_API_LOG_MAX_BODY]}\n… (truncated, {len(body)} chars total)"
+    else:
+        body_txt = body
+    _api_log_line(f"{_now()} | RESPONSE | {status} in {elapsed_ms:.0f} ms | {url}\n{body_txt}")
+
+
+def _log_failure(url: str, elapsed_ms: float, exc: BaseException) -> None:
+    detail = "".join(traceback.format_exception_only(type(exc), exc)).strip()
+    _api_log_line(f"{_now()} | ERROR    | FAILED after {elapsed_ms:.0f} ms | {url} | {detail}")
+
+
 class CanvasApiClient():
     """Canvas Parent API Client."""
     def __init__(
@@ -39,6 +132,7 @@ class CanvasApiClient():
         api_key,
         path: str = None,
         debug=False,
+        label: str = None,
     ):
         if debug:
             _enable_debug_logging()
@@ -51,18 +145,28 @@ class CanvasApiClient():
         _LOGGER.debug(f"generated base url: {self._base_url}")
 
         self._api_key = api_key
+        self._caller_label = label or ""
+        self._masked_key = _mask_api_key(api_key)
         self._headers = {"accept": "application/json", "Authorization": f"Bearer {self._api_key}"}
 
     async def _get_request(self, end_url: str):
-        """Perform GET request to API endpoint."""
+        """Perform GET request to API endpoint, logging the call and its response."""
         request_url = urljoin(self._base_url, end_url)
-        async with aiohttp.ClientSession() as session:
-            async with session.get(f"{request_url}", headers=self._headers) as resp:
-                response = resp
-                responsetext = await resp.text()
-                if response.status >= 400:
-                    raise CanvasError(response.status, responsetext)
-                return response
+        _log_request("GET", request_url, self._caller_label, self._masked_key)
+        t0 = time.perf_counter()
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(f"{request_url}", headers=self._headers) as resp:
+                    response = resp
+                    responsetext = await resp.text()
+        except Exception as exc:  # network error / timeout before a response arrived
+            _log_failure(request_url, (time.perf_counter() - t0) * 1000.0, exc)
+            raise
+
+        _log_response(response.status, responsetext, (time.perf_counter() - t0) * 1000.0, request_url)
+        if response.status >= 400:
+            raise CanvasError(response.status, responsetext)
+        return response
 
     async def _get_paginated(self, end_url: str) -> list:
         """Perform GET request, following all pagination links."""
