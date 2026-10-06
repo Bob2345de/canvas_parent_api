@@ -35,7 +35,8 @@ if (-not $wheel) { throw "no wheel produced in dist/" }
 Write-Host "built: $($wheel.Name)"
 
 Write-Host "== 3/4 verifying wheel contains current code =="
-py -c "import glob, zipfile, sys; w=glob.glob(r'dist/*.whl')[0]; z=zipfile.ZipFile(w); c=z.read('canvas_parent_api/canvas.py').decode(); cl=z.read('canvas_parent_api/canvas_api_client.py').decode(); checks={'courses enrollment_state': 'enrollment_state' in c.split('async def courses')[1].split(chr(10))[0], 'label kwarg': 'label: str = None' in c, 'log_request': 'def _log_request' in cl, 'log_response': 'def _log_response' in cl, 'planner_items': 'def get_planner_items' in cl, 'planner model': 'canvas_parent_api/models/planner_item.py' in z.namelist()}; [print(('PASS  ' if v else 'FAIL  ') + k) for k, v in checks.items()]; sys.exit(0 if all(checks.values()) else 1)"
+py -c "import glob, zipfile, sys; w=glob.glob(r'dist/*.whl')[0]; z=zipfile.ZipFile(w); c=z.read('canvas_parent_api/canvas.py').decode(); cl=z.read('canvas_parent_api/canvas_api_client.py').decode(); checks={'courses enrollment_state': 'enrollment_state' in c.split('async def courses')[1].split(chr(10))[0], 'label kwarg': 'label: str = None' in c, 'log_request': 'def _log_request' in cl, 'log_response': 'def _log_response' in cl, 'planner_items': 'def get_planner_items' in cl, 'planner model': 'canvas_parent_api/models/planner_item.py' in z.namelist(),
+        'planner schema': all(k in z.read('canvas_parent_api/models/base.py').decode() for k in ('plannable_type', 'plannable_date', 'plannable'))}; [print(('PASS  ' if v else 'FAIL  ') + k) for k, v in checks.items()]; sys.exit(0 if all(checks.values()) else 1)"
 
 Write-Host "== 4/4 deploy =="
 if ($NoDeploy) {

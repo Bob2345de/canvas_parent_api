@@ -7,29 +7,37 @@ from canvas_parent_api.canvas_api_client import PlannerItemResponse
 class PlannerItem(DataModel):
     """Planner Item Model Definition.
 
-    Wraps one entry from GET /api/v1/users/:user_id/planner/items. Unlike the
-    calendar endpoint these items carry the title directly and the date under
-    ``date``; convenience properties also expose submission/override state so
-    callers can tell whether the item was already submitted or marked complete.
+    Wraps one entry from GET /api/v1/users/:user_id/planner/items. Canvas nests
+    the human-readable name and points inside ``plannable``, puts the date under
+    ``plannable_date`` and the kind under ``plannable_type``. The convenience
+    properties flatten those and expose submission/override state.
     """
     def __init__(self, planner_item_resp: PlannerItemResponse):
-        self._context_code = planner_item_resp.context_code
+        self._context_type = planner_item_resp.context_type
         self._context_name = planner_item_resp.context_name
         self._course_id = planner_item_resp.course_id
         self._group_id = planner_item_resp.group_id
-        self._type = planner_item_resp.type
-        self._date = planner_item_resp.date
-        self._title = planner_item_resp.title
-        self._points_possible = planner_item_resp.points_possible
+        self._plannable_type = planner_item_resp.plannable_type
+        self._plannable_date = planner_item_resp.plannable_date
+        self._plannable = planner_item_resp.plannable or {}
         self._html_url = planner_item_resp.html_url
         self._planner_override = planner_item_resp.planner_override or {}
         self._submissions = planner_item_resp.submissions or {}
         self._new_activity = planner_item_resp.new_activity
 
     @property
+    def context_type(self) -> Optional[str]:
+        """Context kind, e.g. 'Course' or 'Group'."""
+        return self._context_type
+
+    @property
     def context_code(self) -> Optional[str]:
-        """Property Definition."""
-        return self._context_code
+        """e.g. 'course_15906' — derived (lowercased) from context_type plus course/group id."""
+        if self._course_id is not None:
+            return f"{(self._context_type or 'course').lower()}_{self._course_id}"
+        if self._group_id is not None:
+            return f"{(self._context_type or 'group').lower()}_{self._group_id}"
+        return None
 
     @property
     def context_name(self) -> Optional[str]:
@@ -49,32 +57,37 @@ class PlannerItem(DataModel):
     @property
     def type(self) -> Optional[str]:
         """Item kind, e.g. 'assignment', 'Quiz', 'Discussion', 'Announcement', 'Calendar Event'."""
-        return self._type
+        return self._plannable_type
 
     @property
-    def date(self) -> Optional[str]:
-        """ISO-8601 date/due date of the item."""
-        return self._date
+    def plannable_type(self) -> Optional[str]:
+        """Alias of ``type``."""
+        return self._plannable_type
 
     @property
     def due_at(self) -> Optional[str]:
-        """Alias of ``date`` so callers can sort/treat it like a due date."""
-        return self._date
+        """Planner date of the item; falls back to the plannable's own due_at."""
+        return self._plannable_date or (self._plannable or {}).get("due_at")
+
+    @property
+    def date(self) -> Optional[str]:
+        """Alias of ``due_at``."""
+        return self.due_at
 
     @property
     def name(self) -> Optional[str]:
-        """Human-readable title of the item."""
-        return self._title
+        """Human-readable title, read from the nested plannable payload."""
+        return (self._plannable or {}).get("title") or (self._plannable or {}).get("name")
 
     @property
     def title(self) -> Optional[str]:
         """Alias of ``name``."""
-        return self._title
+        return self.name
 
     @property
     def points_possible(self) -> Optional[float]:
-        """Property Definition."""
-        return self._points_possible
+        """Points possible for the item (from the nested plannable payload)."""
+        return (self._plannable or {}).get("points_possible")
 
     @property
     def html_url(self) -> Optional[str]:
@@ -103,6 +116,14 @@ class PlannerItem(DataModel):
 
     @property
     def submitted(self) -> bool:
-        """True if the item's submission is submitted (or has a grade)."""
+        """True if the item's submission is submitted or graded.
+
+        Handles both the boolean ``submissions.submitted`` flag used by the
+        planner endpoint and the ``workflow_state`` / ``submitted_at`` fields.
+        """
+        if self._submissions.get("submitted") is True:
+            return True
         state = self._submissions.get("workflow_state") or ""
-        return state in ("submitted", "graded") or self._submissions.get("submitted_at") is not None
+        if state in ("submitted", "graded"):
+            return True
+        return self._submissions.get("submitted_at") is not None

@@ -224,20 +224,18 @@ class TodoItemResponse(BaseModel):
 class PlannerItemResponse(BaseModel):
     """Planner Item Response Definition.
 
-    GET /api/v1/users/:user_id/planner/items returns flattened items where the
-    human-readable name lives under ``title`` and the date under ``date``
-    (unlike the calendar endpoint's start_at/title). Every field is optional
-    because a planner item can represent an assignment, quiz, discussion,
-    announcement, page or calendar event.
+    GET /api/v1/users/:user_id/planner/items returns each item with the
+    human-readable name and points nested inside ``plannable``, the date under
+    ``plannable_date`` and the kind under ``plannable_type`` (verified against a
+    live canvas response: plannable.title / plannable.points_possible).
     """
-    context_code: Optional[str] = Field(None)
+    context_type: Optional[str] = Field(None)
     context_name: Optional[str] = Field(None)
     course_id: Optional[int] = Field(None)
     group_id: Optional[int] = Field(None)
-    type: Optional[str] = Field(None)
-    date: Optional[str] = Field(None)
-    title: Optional[str] = Field(None)
-    points_possible: Optional[float] = Field(None)
+    plannable_type: Optional[str] = Field(None)
+    plannable_date: Optional[str] = Field(None)
+    plannable: Optional[dict] = Field(None)
     html_url: Optional[str] = Field(None)
     planner_override: Optional[dict] = Field(None)
     submissions: Optional[dict] = Field(None)

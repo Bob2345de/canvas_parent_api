@@ -1,5 +1,22 @@
 # Changelog
 
+[2026-10-06 16:20] - Fixed planner item schema parsing (title/date were "None — unknown date")
+Summary: The real Canvas planner/items response nests the item name and points under `plannable`, the date under `plannable_date` and the kind under `plannable_type`; the model previously read non-existent flat fields (title/date/type/points_possible), so canvas_get_calendar_events rendered "None — unknown date". PlannerItemResponse and PlannerItem now map the real schema, `context_code` is derived from context_type + course/group id, `submitted` also accepts the boolean submissions.submitted flag, and the tool falls back to "Untitled". Library 0.0.29 -> 0.0.30, tool 0.3.4 -> 0.3.5. Verified against the real payload from the request log (Annabelle, user 4835).
+
+Files changed:
+
+src/canvas_parent_api/models/base.py — PlannerItemResponse now uses context_type, plannable_type, plannable_date and plannable (dict).
+
+src/canvas_parent_api/models/planner_item.py — PlannerItem flattens plannable.title/points_possible, plannable_date, plannable_type; context_code derived; submitted handles boolean submissions.submitted.
+
+Canvas Parent Monitor.json — canvas_get_calendar_events falls back to "Untitled" for missing names; version 0.3.4 -> 0.3.5.
+
+setup.py, pyproject.toml — library version 0.0.29 -> 0.0.30.
+
+README.md — patch note for 0.0.30.
+
+build_deploy.ps1 — added a 'planner schema' wheel check (plannable_type/plannable_date/plannable present in base.py).
+
 [2026-10-06 15:45] - Calendar tool now uses the Planner endpoint (planner/items)
 Summary: The calendar tool (canvas_get_calendar_events) now fetches each child's schedule from GET /api/v1/users/:user_id/planner/items (Canvas "My Planner" feed) instead of the calendar_events endpoint, with start_date = today and end_date = today + days_ahead. Added library support: client.planner_items(user_id, start_date, end_date, context_codes, observed_user_id, filter) with the new PlannerItem model (name/date/type/context_name/points/html_url/submitted/marked_complete). Library 0.0.28 -> 0.0.29, tool 0.3.3 -> 0.3.4.
 

@@ -114,6 +114,9 @@ Note: Attendance (Roll Call) is not available through the public Canvas REST API
 
 ### Patch Notes
 
+ - 0.0.30:
+	- Fixed planner item parsing: Canvas returns planner items with the name/points nested under `plannable` and the date under `plannable_date` / kind under `plannable_type`. `PlannerItem.name/date/type/points_possible` now read the real schema (previously they read non-existent flat fields, so the calendar tool showed "None — unknown date"). `submitted` also handles the planner endpoint's boolean `submissions.submitted` flag.
+
  - 0.0.29:
 	- Added the Planner API: `await client.planner_items(user_id, start_date=..., end_date=..., context_codes=[...], observed_user_id=..., filter=...)` calls `GET /api/v1/users/:user_id/planner/items` (the data behind the Canvas "My Planner" dashboard). Returns `PlannerItem` objects with `name`, `date`/`due_at`, `type`, `context_name`, `course_id`, `points_possible`, `html_url` and submission completion state (`submitted`, `marked_complete`).
 

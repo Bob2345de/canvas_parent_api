@@ -2,7 +2,7 @@
 title: Canvas Parent Monitor
 description: Complete parent dashboard for Canvas LMS (school data for Niclas and Annabelle). List each child's current courses and past course history, upcoming/missing/completed assignments, current grades, grades by category, teacher announcements, school calendar events, assignment details with feedback, course syllabus, teacher contacts, module progress, the to-do list of outstanding work, and recent activity.
 author: Your Name
-version: 0.3.4
+version: 0.3.5
 requirements: canvas_parent_api @ https://github.com/Bob2345de/canvas_parent_api/archive/refs/heads/master.zip
 """
 
@@ -841,10 +841,11 @@ class Tools:
                 continue
             for item in sorted(items, key=lambda i: i.due_at or ""):
                 when = self._fmt_dt(item.due_at, with_time=True)
+                name = item.name or "Untitled"
                 kind = f" [{item.type}]" if item.type else ""
                 context = f" [{item.context_name}]" if item.context_name else ""
                 pts = f" ({item.points_possible:g} pts)" if item.points_possible else ""
-                results.append(f"  • **{item.name}**{pts} — {when}{context}{kind}")
+                results.append(f"  • **{name}**{pts} — {when}{context}{kind}")
                 state = ""
                 if item.submitted:
                     state = " (✅ submitted)"
