@@ -2,7 +2,7 @@
 title: Canvas Parent Monitor
 description: Complete parent dashboard for Canvas LMS (school data for Niclas and Annabelle). List each child's current courses and past course history, upcoming/missing/completed assignments, current grades, grades by category, teacher announcements, school calendar events, assignment details with feedback, course syllabus, teacher contacts, module progress, the to-do list of outstanding work, and recent activity.
 author: Your Name
-version: 0.3.3
+version: 0.3.4
 requirements: canvas_parent_api @ https://github.com/Bob2345de/canvas_parent_api/archive/refs/heads/master.zip
 """
 
@@ -793,9 +793,13 @@ class Tools:
         self, days_ahead: int = 14, child_name: str = ""
     ) -> str:
         """
-        Get upcoming SCHOOL calendar events from Canvas LMS for the children
-        Niclas and Annabelle: tests, quizzes, field trips, parent meetings,
-        school holidays, and other scheduled school events beyond regular assignments.
+        Get upcoming SCHOOL calendar entries from Canvas LMS for the children
+        Niclas and Annabelle: tests, quizzes, assignments, field trips, parent
+        meetings, school holidays, and other scheduled school items.
+
+        This uses each child's "My Planner" feed
+        (GET /api/v1/users/{user_id}/planner/items), which lists everything
+        scheduled on their Canvas calendar/planner within the requested window.
 
         USE THIS TOOL when the question is about school, class, or a child by name, e.g.
         "what's on Niclas's school calendar?", "does Annabelle have a test coming up?",
@@ -812,6 +816,9 @@ class Tools:
         if error:
             return error
 
+        now = datetime.now().astimezone()
+        start_date = now.strftime("%Y-%m-%d")
+        end_date = (now + timedelta(days=days_ahead)).strftime("%Y-%m-%d")
         results = []
         errors = []
 
@@ -822,22 +829,32 @@ class Tools:
                 errors.append(cerr)
                 continue
             try:
-                events = await client.calendar_events(student.id, days_ahead=days_ahead)
+                items = await client.planner_items(
+                    student.id, start_date=start_date, end_date=end_date
+                )
             except Exception as e:
-                errors.append(f"Error fetching calendar events for {student.name}: {e}")
+                errors.append(f"Error fetching calendar entries for {student.name}: {e}")
                 continue
 
-            if not events:
-                results.append("  ℹ️ No calendar events scheduled.")
+            if not items:
+                results.append("  ℹ️ No calendar entries scheduled.")
                 continue
-            for event in sorted(events, key=lambda e: e.start_at or ""):
-                when = self._fmt_dt(event.start_at, with_time=not event.all_day)
-                context = f" [{event.context_name}]" if event.context_name else ""
-                location = f" @ {event.location_name}" if event.location_name else ""
-                results.append(f"  • **{event.title}** — {when}{context}{location}")
-                desc = self._strip_html(event.description, max_len=200)
-                if desc:
-                    results.append(f"    {desc}")
+            for item in sorted(items, key=lambda i: i.due_at or ""):
+                when = self._fmt_dt(item.due_at, with_time=True)
+                kind = f" [{item.type}]" if item.type else ""
+                context = f" [{item.context_name}]" if item.context_name else ""
+                pts = f" ({item.points_possible:g} pts)" if item.points_possible else ""
+                results.append(f"  • **{item.name}**{pts} — {when}{context}{kind}")
+                state = ""
+                if item.submitted:
+                    state = " (✅ submitted)"
+                elif item.marked_complete:
+                    state = " (✅ marked complete)"
+                if state:
+                    results.append(f"    {state.strip()}")
+                url = item.html_url or ""
+                if url:
+                    results.append(f"    🔗 {url}")
 
         if errors:
             results.append("\n⚠️ **Some data could not be retrieved:**")

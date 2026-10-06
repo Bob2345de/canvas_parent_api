@@ -1,5 +1,33 @@
 # Changelog
 
+[2026-10-06 15:45] - Calendar tool now uses the Planner endpoint (planner/items)
+Summary: The calendar tool (canvas_get_calendar_events) now fetches each child's schedule from GET /api/v1/users/:user_id/planner/items (Canvas "My Planner" feed) instead of the calendar_events endpoint, with start_date = today and end_date = today + days_ahead. Added library support: client.planner_items(user_id, start_date, end_date, context_codes, observed_user_id, filter) with the new PlannerItem model (name/date/type/context_name/points/html_url/submitted/marked_complete). Library 0.0.28 -> 0.0.29, tool 0.3.3 -> 0.3.4.
+
+Files changed:
+
+src/canvas_parent_api/models/base.py — added PlannerItemResponse (context_code, context_name, course_id, group_id, type, date, title, points_possible, html_url, planner_override, submissions, new_activity).
+
+src/canvas_parent_api/models/planner_item.py — new PlannerItem wrapper with name/date/due_at/type/context_name/points_possible/html_url and submitted/marked_complete conveniences.
+
+src/canvas_parent_api/canvas_api_client.py — added get_planner_items() building users/{user_id}/planner/items?per_page=50&start_date=...&end_date=...&context_codes[]=...&observed_user_id=...&filter=...; imported PlannerItemResponse.
+
+src/canvas_parent_api/canvas.py — added public async planner_items(...) method; imported PlannerItem.
+
+Canvas Parent Monitor.json — canvas_get_calendar_events now calls client.planner_items(student.id, start_date, end_date) and renders name/type/context/points/state/link lines; docstring updated; version 0.3.3 -> 0.3.4.
+
+setup.py, pyproject.toml — library version 0.0.28 -> 0.0.29.
+
+README.md — patch note for 0.0.29 (Planner API).
+
+build_deploy.ps1 — wheel verification now also checks for get_planner_items and models/planner_item.py.
+
+[2026-10-06 15:20] - Added build_deploy.ps1 one-command rebuild script
+Summary: New PowerShell script that cleans stale build/ + egg-info + dist artifacts, builds a fresh wheel from src/, verifies the wheel really contains the current code (courses() enrollment_state param, label kwarg, per-call logger), and optionally deploys it into the Open WebUI container and runtime-verifies the installed signature. Run `pwsh build_deploy.ps1 [-Container name] [-NoDeploy]`.
+
+Files changed:
+
+build_deploy.ps1 — new script (clean -> build -> verify -> deploy -> verify installed code).
+
 [2026-10-06 15:00] - Removed stale tracked build/ artifacts (root cause of stale library installs)
 Summary: `build/lib/canvas_parent_api/*` was committed to git and contained 0.0.24-era code (Canvas.courses() without enrollment_state, no request/response logging). Anything installed from this directory or from GitHub master.zip (which includes build/) therefore ran old code even when version metadata said 0.0.28, causing "Canvas.courses() got an unexpected keyword argument 'enrollment_state'". Removed build/ from the repo and git history onwards, added build/ to .gitignore, and built a verified-clean wheel (canvas_parent_api-0.0.28-py3-none-any.whl) from src/ that contains courses(..., enrollment_state), the label kwarg, and the per-call logger.
 

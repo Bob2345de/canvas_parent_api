@@ -15,6 +15,7 @@ from .models.teacher import Teacher
 from .models.module import Module
 from .models.activity_stream_item import ActivityStreamItem
 from .models.todo_item import TodoItem
+from .models.planner_item import PlannerItem
 from .canvas_api_client import CanvasApiClient
 
 _LOGGER = logging.getLogger(__name__)
@@ -131,3 +132,32 @@ class Canvas():
         """Get the To-Do list scoped to a single course: must supply course id."""
         todoresp = await self._api_client.get_course_todo(course_id)
         return [TodoItem(response) for response in todoresp]
+
+    async def planner_items(
+        self,
+        user_id,
+        start_date: str = None,
+        end_date: str = None,
+        context_codes: list = None,
+        observed_user_id: int = None,
+        filter: str = None,
+    ) -> list[PlannerItem]:
+        """Get Canvas Planner items for a student: must supply student id.
+
+        Calls GET /api/v1/users/{user_id}/planner/items — the data source for the
+        Canvas "My Planner" dashboard. Usable as a calendar feed for a child.
+
+        :param user_id: Canvas user id of the student.
+        :param start_date: Only return items starting from this date
+            (yyyy-mm-dd or ISO 8601 YYYY-MM-DDTHH:MM:SSZ).
+        :param end_date: Only return items up to this date.
+        :param context_codes: Optional list like ["course_42", "group_123"] to
+            limit items to those courses/groups; defaults to all of the user's.
+        :param observed_user_id: Return planner items for the given observed
+            user (must be accompanied by context_codes[]).
+        :param filter: "new_activity", "incomplete_items" or "complete_items".
+        """
+        itemsresp = await self._api_client.get_planner_items(
+            user_id, start_date, end_date, context_codes, observed_user_id, filter
+        )
+        return [PlannerItem(response) for response in itemsresp]

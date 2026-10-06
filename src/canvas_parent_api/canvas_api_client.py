@@ -26,6 +26,7 @@ from .models.base import (
     AssignmentGroupResponse,
     TeacherResponse,
     ModuleResponse,
+    PlannerItemResponse,
     ActivityStreamItemResponse,
     TodoItemResponse,
 )
@@ -237,6 +238,45 @@ class CanvasApiClient():
             end_url += f"&end_date={end_date}"
         parsed_json = await self._get_paginated(end_url)
         return [CalendarEventResponse(**resp) for resp in parsed_json]
+
+    async def get_planner_items(
+        self,
+        user_id: int,
+        start_date: str = None,
+        end_date: str = None,
+        context_codes: list = None,
+        observed_user_id: int = None,
+        filter: str = None,
+    ) -> list[PlannerItemResponse]:
+        """Get Canvas Planner items for a student.
+
+        Calls GET /api/v1/users/{user_id}/planner/items — the data source behind
+        the Canvas "My Planner" dashboard.
+
+        :param user_id: Canvas user id of the student.
+        :param start_date: Only return items starting from this date
+            (yyyy-mm-dd or ISO 8601 YYYY-MM-DDTHH:MM:SSZ).
+        :param end_date: Only return items up to this date.
+        :param context_codes: Optional list like ["course_42", "group_123"] to
+            limit items to those courses/groups; defaults to all of the user's.
+        :param observed_user_id: Return planner items for the given observed
+            user (must be accompanied by context_codes[] and the caller must be
+            observing that user in all those courses).
+        :param filter: "new_activity", "incomplete_items" or "complete_items".
+        """
+        end_url = f"users/{user_id}/planner/items?per_page=50"
+        if start_date:
+            end_url += f"&start_date={start_date}"
+        if end_date:
+            end_url += f"&end_date={end_date}"
+        for ctx in context_codes or []:
+            end_url += f"&context_codes[]={ctx}"
+        if observed_user_id:
+            end_url += f"&observed_user_id={observed_user_id}"
+        if filter:
+            end_url += f"&filter={filter}"
+        parsed_json = await self._get_paginated(end_url)
+        return [PlannerItemResponse(**resp) for resp in parsed_json]
 
     async def get_assignment(self, course_id: int, assignment_id: int) -> AssignmentResponse:
         """Get a single Canvas Assignment with submission details."""

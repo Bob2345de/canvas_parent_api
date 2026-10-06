@@ -221,6 +221,29 @@ class TodoItemResponse(BaseModel):
     visible_in_planner: Optional[bool] = Field(None)
 
 
+class PlannerItemResponse(BaseModel):
+    """Planner Item Response Definition.
+
+    GET /api/v1/users/:user_id/planner/items returns flattened items where the
+    human-readable name lives under ``title`` and the date under ``date``
+    (unlike the calendar endpoint's start_at/title). Every field is optional
+    because a planner item can represent an assignment, quiz, discussion,
+    announcement, page or calendar event.
+    """
+    context_code: Optional[str] = Field(None)
+    context_name: Optional[str] = Field(None)
+    course_id: Optional[int] = Field(None)
+    group_id: Optional[int] = Field(None)
+    type: Optional[str] = Field(None)
+    date: Optional[str] = Field(None)
+    title: Optional[str] = Field(None)
+    points_possible: Optional[float] = Field(None)
+    html_url: Optional[str] = Field(None)
+    planner_override: Optional[dict] = Field(None)
+    submissions: Optional[dict] = Field(None)
+    new_activity: Optional[bool] = Field(None)
+
+
 class ActivityStreamItemResponse(BaseModel):
     """Activity Stream Item Response Definition."""
     id: int
