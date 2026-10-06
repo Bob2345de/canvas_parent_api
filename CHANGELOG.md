@@ -1,5 +1,12 @@
 # Changelog
 
+[2026-10-06 14:20] - Backward-compatible label in tool client factory
+Summary: Fixed "Canvas.__init__() got an unexpected keyword argument 'label'" seen when the Open WebUI container still runs canvas_parent_api < 0.0.28. The tool now checks whether the installed library accepts the label kwarg and falls back to Canvas(base_url, token) if not, so tools keep working until the container's library is updated; tool version 0.3.1 -> 0.3.2.
+
+Files changed:
+
+Canvas Parent Monitor.json — added _canvas_supports_label() (inspect.signature check) and _new_canvas_client(); _get_client uses them so label= is only passed when supported by the installed library. Version 0.3.1 -> 0.3.2. To get the full logging feature (caller labels + request/response log), update the library inside the container to 0.0.28.
+
 [2026-10-06 13:15] - Per-call Canvas API request/response logging
 Summary: The backend API client now logs every HTTP request it makes to the Canvas API — the request (method, full URL, masked token, caller label) and the response (status, elapsed time, body) — with timestamps, to a text file. Default location is /app/backend/data/canvas_api.log (the Open WebUI data dir, volume-mounted to the host so it is reachable both inside the container and from the host); configurable via CANVAS_API_LOG_FILE and CANVAS_API_LOG_MAX_BODY. The tool passes a caller label (child name or "parent") so entries identify which key made the call. Library 0.0.27 -> 0.0.28, tool 0.3.0 -> 0.3.1.
 

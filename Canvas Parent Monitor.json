@@ -2,11 +2,12 @@
 title: Canvas Parent Monitor
 description: Complete parent dashboard for Canvas LMS (school data for Niclas and Annabelle). List each child's current courses and past course history, upcoming/missing/completed assignments, current grades, grades by category, teacher announcements, school calendar events, assignment details with feedback, course syllabus, teacher contacts, module progress, the to-do list of outstanding work, and recent activity.
 author: Your Name
-version: 0.3.1
+version: 0.3.2
 requirements: canvas_parent_api @ https://github.com/Bob2345de/canvas_parent_api/archive/refs/heads/master.zip
 """
 
 import asyncio
+import inspect
 import re
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, List, Optional
@@ -82,9 +83,27 @@ class Tools:
         key = (self.valves.CANVAS_BASE_URL, token)
         client = self._clients.get(key)
         if client is None:
-            client = Canvas(key[0], key[1], label=label)
+            client = self._new_canvas_client(token, label)
             self._clients[key] = client
         return client
+
+    @staticmethod
+    def _canvas_supports_label() -> bool:
+        """True if the installed canvas_parent_api accepts a ``label`` kwarg (>= 0.0.28).
+
+        Older builds (< 0.0.28) raise TypeError on ``Canvas(..., label=...)``, so
+        the tool degrades gracefully until the container's library is updated.
+        """
+        try:
+            return "label" in inspect.signature(Canvas.__init__).parameters
+        except (TypeError, ValueError):
+            return False
+
+    def _new_canvas_client(self, token: str, label: str) -> Canvas:
+        base_url = self.valves.CANVAS_BASE_URL
+        if self._canvas_supports_label():
+            return Canvas(base_url, token, label=label)
+        return Canvas(base_url, token)
 
     def _get_parent_client(self) -> Canvas:
         """Return the Canvas client built from the PARENT token.
