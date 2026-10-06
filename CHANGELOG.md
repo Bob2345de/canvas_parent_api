@@ -1,5 +1,25 @@
 # Changelog
 
+[2026-10-06 15:00] - Removed stale tracked build/ artifacts (root cause of stale library installs)
+Summary: `build/lib/canvas_parent_api/*` was committed to git and contained 0.0.24-era code (Canvas.courses() without enrollment_state, no request/response logging). Anything installed from this directory or from GitHub master.zip (which includes build/) therefore ran old code even when version metadata said 0.0.28, causing "Canvas.courses() got an unexpected keyword argument 'enrollment_state'". Removed build/ from the repo and git history onwards, added build/ to .gitignore, and built a verified-clean wheel (canvas_parent_api-0.0.28-py3-none-any.whl) from src/ that contains courses(..., enrollment_state), the label kwarg, and the per-call logger.
+
+Files changed:
+
+.gitignore — added build/ and src/canvas_parent_api.egg-info/ so build artifacts can't be committed again.
+
+build/lib/canvas_parent_api/... (18 files) — deleted from the repo; these stale artifacts were the source of the wrong-code installs.
+
+canvas_parent_api-0.0.28-py3-none-any.whl — built fresh into dist/ (gitignored) from src/ and verified to contain the current code.
+
+REINSTALL REQUIRED IN CONTAINER: docker cp dist/canvas_parent_api-0.0.28-py3-none-any.whl open-webui:/tmp/ && docker exec open-webui pip install --force-reinstall /tmp/canvas_parent_api-0.0.28-py3-none-any.whl, then verify with inspect.signature(Canvas.courses). If the tool re-installs from the GitHub master.zip (tool requirements line), push these changes to GitHub first so the zip no longer contains build/.
+
+[2026-10-06 14:40] - Fallback when installed library lacks enrollment_state on courses()
+Summary: Fixed "Canvas.courses() got an unexpected keyword argument 'enrollment_state'" (container running canvas_parent_api < 0.0.25). _get_filtered_courses now checks via inspect.signature whether the installed Canvas.courses() accepts enrollment_state and calls courses(student.id) without it when not supported. Tool version 0.3.2 -> 0.3.3. Container still needs the library updated to 0.0.28 for full functionality + request/response logging.
+
+Files changed:
+
+Canvas Parent Monitor.json — added _courses_supports_enrollment_state() helper; _get_filtered_courses falls back to courses(student.id) on older libraries. Version 0.3.2 -> 0.3.3.
+
 [2026-10-06 14:20] - Backward-compatible label in tool client factory
 Summary: Fixed "Canvas.__init__() got an unexpected keyword argument 'label'" seen when the Open WebUI container still runs canvas_parent_api < 0.0.28. The tool now checks whether the installed library accepts the label kwarg and falls back to Canvas(base_url, token) if not, so tools keep working until the container's library is updated; tool version 0.3.1 -> 0.3.2.
 

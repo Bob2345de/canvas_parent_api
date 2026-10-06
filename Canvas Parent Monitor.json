@@ -2,7 +2,7 @@
 title: Canvas Parent Monitor
 description: Complete parent dashboard for Canvas LMS (school data for Niclas and Annabelle). List each child's current courses and past course history, upcoming/missing/completed assignments, current grades, grades by category, teacher announcements, school calendar events, assignment details with feedback, course syllabus, teacher contacts, module progress, the to-do list of outstanding work, and recent activity.
 author: Your Name
-version: 0.3.2
+version: 0.3.3
 requirements: canvas_parent_api @ https://github.com/Bob2345de/canvas_parent_api/archive/refs/heads/master.zip
 """
 
@@ -104,6 +104,14 @@ class Tools:
         if self._canvas_supports_label():
             return Canvas(base_url, token, label=label)
         return Canvas(base_url, token)
+
+    @staticmethod
+    def _courses_supports_enrollment_state(client) -> bool:
+        """True if the installed library's Canvas.courses() accepts enrollment_state (>= 0.0.25)."""
+        try:
+            return "enrollment_state" in inspect.signature(client.courses).parameters
+        except (TypeError, ValueError):
+            return False
 
     def _get_parent_client(self) -> Canvas:
         """Return the Canvas client built from the PARENT token.
@@ -281,7 +289,12 @@ class Tools:
         if cerr:
             return None, cerr
         try:
-            courses = await client.courses(student.id, enrollment_state=enrollment_state)
+            if self._courses_supports_enrollment_state(client):
+                courses = await client.courses(student.id, enrollment_state=enrollment_state)
+            else:
+                # Fallback for installed libraries older than 0.0.25 whose
+                # Canvas.courses() only takes (student_id,).
+                courses = await client.courses(student.id)
         except Exception as e:
             return None, f"Error fetching courses for {student.name}: {e}"
 
