@@ -2,7 +2,7 @@
 title: Canvas Parent Monitor
 description: Complete parent dashboard for Canvas LMS (school data for Niclas and Annabelle). List each child's current courses and past course history, upcoming/missing/completed assignments, current grades, grades by category, teacher announcements, school calendar events, assignment details with feedback, course syllabus, teacher contacts, module progress, the to-do list of outstanding work, and recent activity.
 author: Your Name
-version: 0.3.5
+version: 0.3.7
 requirements: canvas_parent_api @ https://github.com/Bob2345de/canvas_parent_api/archive/refs/heads/master.zip
 """
 
@@ -10,7 +10,7 @@ import asyncio
 import inspect
 import re
 from datetime import datetime, timedelta, timezone
-from typing import Any, Callable, List, Optional
+from typing import Any, Callable, List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -484,12 +484,40 @@ class Tools:
             results.extend(f"  - {e}" for e in errors)
         return "\n".join(results)
 
-    async def get_current_grades(self, child_name: str = "") -> str:
+    async def get_grades(
+        self,
+        mode: Literal["current", "recent", "by_category"] = "current",
+        child_name: str = "",
+        course_name: str = "",
+        days_back: int = 30,
+    ) -> str:
         """
-        Get the current overall grade in every course for each child.
-        Use this for questions like "how is X doing?" or "what are X's grades?"
+        Get grades for each child. A single entry point with three modes.
+
+        :param mode:
+            current     - overall grade in every course right now ("how is X doing?",
+                          "what are X's grades?"). Ignores course_name and days_back.
+            recent      - grades teachers posted in the last days_back days
+                          ("any new grades for X?", "what did X score on recent work?").
+            by_category - break down a course grade by assignment group / category,
+                          e.g. Homework vs Quizzes vs Tests, with weights and averages
+                          ("where is X losing points?", "tests vs homework?").
+
+        DO NOT use current for past school years - use canvas_get_past_courses.
 
         :param child_name: Optional name of a specific child. Leave empty for all children.
+        :param course_name: Optional course name to limit results to one class (recent/by_category).
+        :param days_back: How many days back to look for mode="recent" (default: 30).
+        """
+        if mode == "recent":
+            return await self._grades_recent(days_back, child_name, course_name)
+        if mode == "by_category":
+            return await self._grades_by_category(child_name, course_name)
+        return await self._grades_current(child_name)
+
+    async def _grades_current(self, child_name: str = "") -> str:
+        """
+        Current overall grade in every course for each child.
         """
         students, error = await self._get_filtered_students(child_name)
         if error:
@@ -514,16 +542,48 @@ class Tools:
             results.extend(f"  - {e}" for e in errors)
         return "\n".join(results)
 
-    async def get_upcoming_assignments(
-        self, days_ahead: int = 7, child_name: str = "", course_name: str = ""
+    async def get_assignments(
+        self,
+        mode: Literal["upcoming", "missing", "completed", "todo"] = "upcoming",
+        child_name: str = "",
+        course_name: str = "",
+        window: int = 30,
     ) -> str:
         """
-        Get upcoming assignments and tests that are due in the next N days and not yet submitted.
-        Use for "what does X have due this week?" or "any tests coming up?"
+        Get a list of assignments per child. A single entry point with four modes.
 
-        :param days_ahead: Number of days to look ahead (default: 7)
+        :param mode:
+            upcoming  - assignments/tests due in the next window days, not yet submitted
+                        ("what does X have due soon?", "any tests coming up?").
+            missing   - assignments marked missing or past-due with no submission
+                        ("is X missing any work?", "late assignments?"). Ignores window.
+            completed - assignments submitted in the last window days, with submission date
+                        and grade if posted ("what has X turned in recently?").
+            todo      - the child's Canvas To-Do list of outstanding work (assignments and
+                        quizzes still to do), grouped by course and ordered by due date
+                        ("what does X still have to do?"). Ignores window.
+
+        DO NOT use for past school years - use canvas_get_past_courses.
+        For full detail and teacher feedback on ONE specific assignment, use
+        get_assignment_details instead.
+
         :param child_name: Optional name of a specific child. Leave empty for all children.
         :param course_name: Optional course name to limit results to one class.
+        :param window: How many days ahead (upcoming) or back (completed) to look (default: 30).
+        """
+        if mode == "missing":
+            return await self._assignments_missing(child_name, course_name)
+        if mode == "completed":
+            return await self._assignments_completed(window, child_name, course_name)
+        if mode == "todo":
+            return await self._assignments_todo(child_name, course_name)
+        return await self._assignments_upcoming(window, child_name, course_name)
+
+    async def _assignments_upcoming(
+        self, days_ahead: int = 30, child_name: str = "", course_name: str = ""
+    ) -> str:
+        """
+        Assignments due in the next N days, not yet submitted.
         """
         students, error = await self._get_filtered_students(child_name)
         if error:
@@ -568,13 +628,9 @@ class Tools:
             results.append("\n⚠️ **Some data could not be retrieved:**")
             results.extend(f"  - {e}" for e in errors)
         return "\n".join(results)
-    async def get_missing_assignments(self, child_name: str = "", course_name: str = "") -> str:
+    async def _assignments_missing(self, child_name: str = "", course_name: str = "") -> str:
         """
-        Get assignments that are marked missing or are past due with no submission.
-        Use for "is X missing any work?" or "does X have late assignments?"
-
-        :param child_name: Optional name of a specific child. Leave empty for all children.
-        :param course_name: Optional course name to limit results to one class.
+        Assignments that are marked missing or past due with no submission.
         """
         students, error = await self._get_filtered_students(child_name)
         if error:
@@ -617,16 +673,11 @@ class Tools:
             results.append("\n⚠️ **Some data could not be retrieved:**")
             results.extend(f"  - {e}" for e in errors)
         return "\n".join(results)
-    async def get_completed_assignments(
-        self, days_back: int = 14, child_name: str = "", course_name: str = ""
+    async def _assignments_completed(
+        self, days_back: int = 30, child_name: str = "", course_name: str = ""
     ) -> str:
         """
-        Get assignments submitted in the last N days, with submission date and grade if posted.
-        Use for "what has X turned in recently?" or "what did X finish this week?"
-
-        :param days_back: Number of days to look back (default: 14)
-        :param child_name: Optional name of a specific child. Leave empty for all children.
-        :param course_name: Optional course name to limit results to one class.
+        Assignments submitted in the last N days, with submission date and grade if posted.
         """
         students, error = await self._get_filtered_students(child_name)
         if error:
@@ -678,16 +729,11 @@ class Tools:
             results.append("\n⚠️ **Some data could not be retrieved:**")
             results.extend(f"  - {e}" for e in errors)
         return "\n".join(results)
-    async def get_recent_grades(
-        self, days_back: int = 7, child_name: str = "", course_name: str = ""
+    async def _grades_recent(
+        self, days_back: int = 30, child_name: str = "", course_name: str = ""
     ) -> str:
         """
-        Get grades that teachers posted in the last N days.
-        Use for "any new grades for X?" or "what did X score on recent work?"
-
-        :param days_back: Number of days to look back (default: 7)
-        :param child_name: Optional name of a specific child. Leave empty for all children.
-        :param course_name: Optional course name to limit results to one class.
+        Grades teachers posted in the last N days.
         """
         students, error = await self._get_filtered_students(child_name)
         if error:
@@ -731,13 +777,13 @@ class Tools:
         return "\n".join(results)
 
     async def get_announcements(
-        self, days_back: int = 7, child_name: str = "", course_name: str = ""
+        self, days_back: int = 30, child_name: str = "", course_name: str = ""
     ) -> str:
         """
         Get recent teacher announcements for each child's courses.
         Use for "any news from X's teachers?" or "what did the teacher post this week?"
 
-        :param days_back: How many days of announcements to fetch (default: 7)
+        :param days_back: How many days of announcements to fetch (default: 30)
         :param child_name: Optional name of a specific child. Leave empty for all children.
         :param course_name: Optional course name to limit results to one class.
         """
@@ -790,7 +836,7 @@ class Tools:
         return "\n".join(results)
 
     async def canvas_get_calendar_events(
-        self, days_ahead: int = 14, child_name: str = ""
+        self, days_ahead: int = 30, child_name: str = ""
     ) -> str:
         """
         Get upcoming SCHOOL calendar entries from Canvas LMS for the children
@@ -809,7 +855,7 @@ class Tools:
         appointments, or meetings the parent is attending. Use the separate Exchange
         calendar tool (get_calendar_events) for those.
 
-        :param days_ahead: How many days ahead to look (default: 14)
+        :param days_ahead: How many days ahead to look (default: 30)
         :param child_name: Optional child to limit results to - either "Niclas" or "Annabelle". Leave empty to get school calendar events for both children.
         """
         students, error = await self._get_filtered_students(child_name)
@@ -958,14 +1004,10 @@ class Tools:
             results.append("\n⚠️ **Some data could not be retrieved:**")
             results.extend(f"  - {e}" for e in errors)
         return "\n".join(results)
-    async def get_grades_by_category(self, child_name: str = "", course_name: str = "") -> str:
+    async def _grades_by_category(self, child_name: str = "", course_name: str = "") -> str:
         """
-        Break down each course grade by assignment category (e.g., Homework, Quizzes, Tests)
+        Break down each course grade by assignment category (e.g., Homework, Quizzes, Tests),
         including category weights and the child's average in each category.
-        Use for "where is X losing points?" or "how is X doing on tests vs homework?"
-
-        :param child_name: Optional name of a specific child. Leave empty for all children.
-        :param course_name: Optional course name to limit results to one class.
         """
         students, error = await self._get_filtered_students(child_name)
         if error:
@@ -1173,13 +1215,13 @@ class Tools:
             results.append("\n⚠️ **Some data could not be retrieved:**")
             results.extend(f"  - {e}" for e in errors)
         return "\n".join(results)
-    async def get_recent_activity(self, hours_back: int = 24) -> str:
+    async def get_recent_activity(self, hours_back: int = 720) -> str:
         """
         Get a chronological feed of recent Canvas activity across all children:
         new grades, announcements, submissions, discussions, and messages.
         Use for "what happened today?" or "give me a quick Canvas update."
 
-        :param hours_back: How many hours of activity to show (default: 24)
+        :param hours_back: How many hours of activity to show (default: 720 hours = 30 days)
         """
         # The activity stream is the parent account's own combined feed, so this
         # (like looking up the children) uses the PARENT token rather than a child token.
@@ -1234,21 +1276,15 @@ class Tools:
                 return payload["context_name"]
         return "Other"
 
-    async def canvas_get_todo(self, child_name: str = "", course_name: str = "") -> str:
+    async def _assignments_todo(self, child_name: str = "", course_name: str = "") -> str:
         """
-        Get each child's Canvas To-Do list — the assignments and quizzes that still
-        need to be done (the items shown on the Canvas dashboard "To Do" sidebar),
-        grouped by course and ordered by due date.
-        Use for questions like "what does Niclas still have to do?", "what is on
-        Annabelle's to-do list?" or "what work is left in her math class?".
+        Each child's Canvas To-Do list - the assignments and quizzes that still need
+        to be done (the items on the Canvas dashboard "To Do" sidebar), grouped by
+        course and ordered by due date.
 
-        This calls the per-student to-do endpoint (GET /api/v1/users/{student_id}/todo)
-        using each child's own Canvas user id, which returns their outstanding work
-        across all of their courses in a single request.
-
-        :param child_name: Optional name of a specific child (e.g. "Niclas" or "Annabelle").
-            Leave empty for all children.
-        :param course_name: Optional course name to limit the to-do list to one class.
+        Calls the per-student to-do endpoint (GET /api/v1/users/{student_id}/todo)
+        using each child's own Canvas user id, returning their outstanding work
+        across all courses in a single request.
         """
         students, error = await self._get_filtered_students(child_name)
         if error:
@@ -1316,9 +1352,9 @@ class Tools:
         :param child_name: Optional name of a specific child. Leave empty for all children.
         """
         sections = await asyncio.gather(
-            self.get_current_grades(child_name),
-            self.get_upcoming_assignments(days_ahead=3, child_name=child_name),
-            self.get_missing_assignments(child_name),
+            self.get_grades(mode="current", child_name=child_name),
+            self.get_assignments(mode="upcoming", window=3, child_name=child_name),
+            self.get_assignments(mode="missing", child_name=child_name),
             self.get_recent_activity(hours_back=24),
             return_exceptions=True,
         )

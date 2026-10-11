@@ -1,5 +1,19 @@
 # Changelog
 
+[2026-10-11 00:00] - Consolidated grade & assignment tools into mode-based dispatchers
+Summary: get_current_grades, get_recent_grades and get_grades_by_category are now a single get_grades(mode="current"|"recent"|"by_category") entry point, each mode delegating to a private _-prefixed helper. get_upcoming_assignments, get_missing_assignments, get_completed_assignments and canvas_get_todo are now a single get_assignments(mode="upcoming"|"missing"|"completed"|"todo"). get_assignment_details is unchanged and get_assignments' docstring now points at it for per-assignment detail. get_daily_summary now calls the new dispatchers (mode="current", mode="upcoming" window=3, mode="missing"). Modes are restricted with typing.Literal enums; the 30-day defaults are preserved. Tool version 0.3.6 -> 0.3.7.
+
+Files changed:
+
+Canvas Parent Monitor.json - replaced the three grade tools and four assignment-list tools with the get_grades and get_assignments mode dispatchers plus _grades_*/_assignments_* private helpers; updated get_daily_summary calls and the typing import; bumped version.
+
+[2026-10-11 00:00] - Default review windows widened to 30 days for all material tools except get_daily_summary
+Summary: get_upcoming_assignments (days_ahead), canvas_get_calendar_events (days_ahead), get_completed_assignments (days_back), get_recent_grades (days_back) and get_announcements (days_back) all now default to 30 days instead of 7/14; get_recent_activity now defaults to 720 hours (30 days) instead of 24. get_daily_summary is intentionally unchanged and keeps its internal 3-day-ahead / 24-hour windows. Tool version 0.3.5 -> 0.3.6.
+
+Files changed:
+
+Canvas Parent Monitor.json - updated the six tool default window params and their docstring defaults.
+
 [2026-10-06 16:20] - Fixed planner item schema parsing (title/date were "None — unknown date")
 Summary: The real Canvas planner/items response nests the item name and points under `plannable`, the date under `plannable_date` and the kind under `plannable_type`; the model previously read non-existent flat fields (title/date/type/points_possible), so canvas_get_calendar_events rendered "None — unknown date". PlannerItemResponse and PlannerItem now map the real schema, `context_code` is derived from context_type + course/group id, `submitted` also accepts the boolean submissions.submitted flag, and the tool falls back to "Untitled". Library 0.0.29 -> 0.0.30, tool 0.3.4 -> 0.3.5. Verified against the real payload from the request log (Annabelle, user 4835).
 
