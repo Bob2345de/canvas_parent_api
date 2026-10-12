@@ -114,6 +114,9 @@ Note: Attendance (Roll Call) is not available through the public Canvas REST API
 
 ### Patch Notes
 
+ - 0.0.31:
+	- Fixed the intermittent "Some data could not be retrieved / value is not a valid dict (type=type_error.dict)" error in `canvas_get_calendar_events`. Canvas returns the planner item `submissions` field as a dict for some items but as a list (array of submission objects) for others; `PlannerItemResponse.submissions` previously required a dict, so any item with a list-form `submissions` failed the whole response. It now accepts both shapes and `PlannerItem` normalizes a list to a single submission dict.
+
  - 0.0.30:
 	- Fixed planner item parsing: Canvas returns planner items with the name/points nested under `plannable` and the date under `plannable_date` / kind under `plannable_type`. `PlannerItem.name/date/type/points_possible` now read the real schema (previously they read non-existent flat fields, so the calendar tool showed "None — unknown date"). `submitted` also handles the planner endpoint's boolean `submissions.submitted` flag.
 

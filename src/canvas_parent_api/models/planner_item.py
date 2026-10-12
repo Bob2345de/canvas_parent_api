@@ -22,7 +22,14 @@ class PlannerItem(DataModel):
         self._plannable = planner_item_resp.plannable or {}
         self._html_url = planner_item_resp.html_url
         self._planner_override = planner_item_resp.planner_override or {}
-        self._submissions = planner_item_resp.submissions or {}
+        # Canvas may send `submissions` as a list of submission objects instead
+        # of a single dict; normalize to the first entry so the rest of this
+        # model (and the `submitted` property) always sees a dict.
+        raw_submissions = planner_item_resp.submissions
+        if isinstance(raw_submissions, list):
+            self._submissions = raw_submissions[0] if raw_submissions else {}
+        else:
+            self._submissions = raw_submissions or {}
         self._new_activity = planner_item_resp.new_activity
 
     @property

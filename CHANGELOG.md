@@ -1,5 +1,24 @@
 # Changelog
 
+[2026-10-12 00:00] - Fixed intermittent "value is not a valid dict" calendar error (planner submissions can be a list)
+Summary: The Canvas planner/items `submissions` field is returned as a dict for some items but as a list (array of submission objects) for others. `PlannerItemResponse.submissions` was typed `Optional[dict]`, so a list-form value made Pydantic reject the whole response, which the calendar tool surfaced as "Error fetching calendar entries for <child>: ... value is not a valid dict (type=type_error.dict)". `submissions` now accepts `Optional[Union[dict, List[dict]]]` and `PlannerItem` normalizes a list to a single submission dict so the `submitted`/`marked_complete` conveniences keep working. Library 0.0.30 -> 0.0.31, tool 0.3.7 -> 0.3.8.
+
+Files changed:
+
+src/canvas_parent_api/models/base.py — PlannerItemResponse.submissions now typed Optional[Union[dict, List[dict]]].
+
+src/canvas_parent_api/models/planner_item.py — normalizes a list-form submissions to the first submission dict (or {} when empty).
+
+build/lib/... (models/base.py, models/planner_item.py) — mirror of the src changes in the tracked build copy.
+
+setup.py, pyproject.toml — library version 0.0.30 -> 0.0.31.
+
+Canvas Parent Monitor.json — tool version 0.3.7 -> 0.3.8.
+
+README.md — patch notes for 0.0.31.
+
+build_deploy.ps1 — added a wheel check that PlannerItemResponse.submissions accepts dict and list shapes.
+
 [2026-10-11 00:00] - Consolidated grade & assignment tools into mode-based dispatchers
 Summary: get_current_grades, get_recent_grades and get_grades_by_category are now a single get_grades(mode="current"|"recent"|"by_category") entry point, each mode delegating to a private _-prefixed helper. get_upcoming_assignments, get_missing_assignments, get_completed_assignments and canvas_get_todo are now a single get_assignments(mode="upcoming"|"missing"|"completed"|"todo"). get_assignment_details is unchanged and get_assignments' docstring now points at it for per-assignment detail. get_daily_summary now calls the new dispatchers (mode="current", mode="upcoming" window=3, mode="missing"). Modes are restricted with typing.Literal enums; the 30-day defaults are preserved. Tool version 0.3.6 -> 0.3.7.
 

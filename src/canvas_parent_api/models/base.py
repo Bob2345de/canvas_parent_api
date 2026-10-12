@@ -1,5 +1,5 @@
 """Base Model Definition."""
-from typing import Optional
+from typing import List, Optional, Union
 from pydantic.v1 import BaseModel, Field
 
 
@@ -238,7 +238,10 @@ class PlannerItemResponse(BaseModel):
     plannable: Optional[dict] = Field(None)
     html_url: Optional[str] = Field(None)
     planner_override: Optional[dict] = Field(None)
-    submissions: Optional[dict] = Field(None)
+    # Canvas returns `submissions` as a single dict for some items and as a
+    # list (array of submission objects) for others, depending on item type and
+    # Canvas version. Accept both so validation never fails on this field.
+    submissions: Optional[Union[dict, List[dict]]] = Field(None)
     new_activity: Optional[bool] = Field(None)
 
 
