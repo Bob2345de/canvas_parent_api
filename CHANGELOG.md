@@ -1,5 +1,22 @@
 # Changelog
 
+[2026-10-12 01:00] - Harden planner `submissions` parsing against any Canvas shape
+Summary: The 0.0.31 fix covered only dict/list `submissions`, but Canvas can also return an empty string or another scalar value, which still failed validation (the symptom showed both "not a valid dict" AND "not a valid list"). `PlannerItemResponse.submissions` is now typed `Optional[Any]` and `PlannerItem` normalizes every shape (dict, list, string, etc.) to a dict defensively, so no `submissions` value can fail validation or crash the calendar tool. Library 0.0.31 -> 0.0.32, tool 0.3.8 -> 0.3.9.
+
+Files changed:
+
+src/canvas_parent_api/models/base.py — `submissions` typed `Optional[Any]` instead of `Optional[Union[dict, List[dict]]]`.
+
+src/canvas_parent_api/models/planner_item.py — `PlannerItem` normalizes any submissions shape to a dict (dict used as-is; list takes first dict entry; everything else {}).
+
+setup.py, pyproject.toml — library version 0.0.31 -> 0.0.32.
+
+Canvas Parent Monitor.json — tool version 0.3.8 -> 0.3.9.
+
+README.md — patch notes for 0.0.32.
+
+build_deploy.ps1 — wheel check now requires the tolerant `submissions: Optional[Any]` field.
+
 [2026-10-12 00:00] - Fixed intermittent "value is not a valid dict" calendar error (planner submissions can be a list)
 Summary: The Canvas planner/items `submissions` field is returned as a dict for some items but as a list (array of submission objects) for others. `PlannerItemResponse.submissions` was typed `Optional[dict]`, so a list-form value made Pydantic reject the whole response, which the calendar tool surfaced as "Error fetching calendar entries for <child>: ... value is not a valid dict (type=type_error.dict)". `submissions` now accepts `Optional[Union[dict, List[dict]]]` and `PlannerItem` normalizes a list to a single submission dict so the `submitted`/`marked_complete` conveniences keep working. Library 0.0.30 -> 0.0.31, tool 0.3.7 -> 0.3.8.
 
