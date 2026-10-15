@@ -1,5 +1,12 @@
 # Changelog
 
+[2026-10-15 19:04] - Package self-contained share zip for Open WebUI / Claude users
+Summary: Built a distributable `Canvas-Parent-Monitor-share.zip` so the tool can be handed to someone else without depending on the remote GitHub URL in the tool's `requirements:` line. It contains the `Canvas Parent Monitor.json` tool, the full `canvas_parent_api` source tree (src/ + packaging files), a freshly built offline-install wheel, and an INSTALL.txt guide.
+
+Files changed:
+
+Canvas-Parent-Monitor-share.zip — new distributable archive (tool JSON + library source + wheel + install guide).
+
 [2026-10-12 01:00] - Harden planner `submissions` parsing against any Canvas shape
 Summary: The 0.0.31 fix covered only dict/list `submissions`, but Canvas can also return an empty string or another scalar value, which still failed validation (the symptom showed both "not a valid dict" AND "not a valid list"). `PlannerItemResponse.submissions` is now typed `Optional[Any]` and `PlannerItem` normalizes every shape (dict, list, string, etc.) to a dict defensively, so no `submissions` value can fail validation or crash the calendar tool. Library 0.0.31 -> 0.0.32, tool 0.3.8 -> 0.3.9.
 
