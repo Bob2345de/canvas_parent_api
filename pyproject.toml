@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "canvas_parent_api"
 version = "0.0.32"
 authors = [
-    {name = "Jacob Schwartz",email = "jake@schwartzpub.com"},
+    {name = "Me"},
 ]
 description = "A small async API wrapper for Canvas Parents."
 readme = "README.md"
@@ -21,7 +21,3 @@ dependencies = [
     "aiohttp",
     "pydantic"
 ]
-
-[project.urls]
-"Homepage" = "https://github.com/schwartzpub/canvas_parent_api"
-"Bug Tracker" = "https://github.com/schwartzpub/canvas_parent_api/issues"

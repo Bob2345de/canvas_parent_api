@@ -1,5 +1,6 @@
 # Canvas Parent API
-This is an async wrapper for the [Canvas API](https://canvas.instructure.com/doc/api/) from Instructure.  There are a few types of objects this will retrieve based on the assumption that you are a parent with students enrolled with Canvas.  
+
+An async wrapper for the [Canvas LMS API](https://canvas.instructure.com/doc/api/) from Instructure, built for parent (observer) accounts. It returns the data a parent needs to keep an eye on how each child is doing across their courses.
 
 The types of objects that can be returned include:
  - Observees (Students)
@@ -14,13 +15,18 @@ The types of objects that can be returned include:
  - To-Do Items (outstanding assignments/quizzes)
  - Activity Stream (recent activity feed)
 
-This module is provided for use with the Home Assistant custom integration [Canvas](https://github.com/schwartzpub/canvas_hassio) however it could be useful as a standalone module for your own projects as well.
+This module is the API layer that powers the **Canvas Parent Monitor** tool for Open WebUI, but it is a standalone library you can use in your own Python projects as well.
+
+Author: Me
 
 ## Installing
-To install the module use:
+
+To install the module from this source folder:
 ```python
-python3 -m pip install canvas-parent-api
+python3 -m pip install .
 ```
+
+Runtime dependencies (`aiohttp`, `pydantic`) install automatically. If you want an offline install, build a wheel with `py -m pip wheel . --no-deps -w dist` and install that instead.
 
 ### Get API Token
 If you are a parent, you will have a Canvas Parent account.  To get an API token, you must sign into the Canvas Parent application from a web browser.  This is typically using: https://<yourdistrict>.instructure.com/login/canvas
@@ -115,36 +121,36 @@ Note: Attendance (Roll Call) is not available through the public Canvas REST API
 ### Patch Notes
 
  - 0.0.32:
-	- Follow-up hardening for `canvas_get_calendar_events`. The planner item `submissions` field is *still* not a stable shape: besides a list it can come back as an empty string or another scalar, so `PlannerItemResponse.submissions` is now typed `Optional[Any]` and `PlannerItem` normalizes every shape (dict, list, string, etc.) to a dict defensively. No Canvas `submissions` value can fail validation or crash the calendar tool anymore.
+- Follow-up hardening for `canvas_get_calendar_events`. The planner item `submissions` field is *still* not a stable shape: besides a list it can come back as an empty string or another scalar, so `PlannerItemResponse.submissions` is now typed `Optional[Any]` and `PlannerItem` normalizes every shape (dict, list, string, etc.) to a dict defensively. No Canvas `submissions` value can fail validation or crash the calendar tool anymore.
 
  - 0.0.31:
-	- Fixed the intermittent "Some data could not be retrieved / value is not a valid dict (type=type_error.dict)" error in `canvas_get_calendar_events`. Canvas returns the planner item `submissions` field as a dict for some items but as a list (array of submission objects) for others; `PlannerItemResponse.submissions` previously required a dict, so any item with a list-form `submissions` failed the whole response. It now accepts both shapes and `PlannerItem` normalizes a list to a single submission dict.
+- Fixed the intermittent "Some data could not be retrieved / value is not a valid dict (type=type_error.dict)" error in `canvas_get_calendar_events`. Canvas returns the planner item `submissions` field as a dict for some items but as a list (array of submission objects) for others; `PlannerItemResponse.submissions` previously required a dict, so any item with a list-form `submissions` failed the whole response. It now accepts both shapes and `PlannerItem` normalizes a list to a single submission dict.
 
  - 0.0.30:
-	- Fixed planner item parsing: Canvas returns planner items with the name/points nested under `plannable` and the date under `plannable_date` / kind under `plannable_type`. `PlannerItem.name/date/type/points_possible` now read the real schema (previously they read non-existent flat fields, so the calendar tool showed "None — unknown date"). `submitted` also handles the planner endpoint's boolean `submissions.submitted` flag.
+- Fixed planner item parsing: Canvas returns planner items with the name/points nested under `plannable` and the date under `plannable_date` / kind under `plannable_type`. `PlannerItem.name/date/type/points_possible` now read the real schema (previously they read non-existent flat fields, so the calendar tool showed "None — unknown date"). `submitted` also handles the planner endpoint's boolean `submissions.submitted` flag.
 
  - 0.0.29:
-	- Added the Planner API: `await client.planner_items(user_id, start_date=..., end_date=..., context_codes=[...], observed_user_id=..., filter=...)` calls `GET /api/v1/users/:user_id/planner/items` (the data behind the Canvas "My Planner" dashboard). Returns `PlannerItem` objects with `name`, `date`/`due_at`, `type`, `context_name`, `course_id`, `points_possible`, `html_url` and submission completion state (`submitted`, `marked_complete`).
+- Added the Planner API: `await client.planner_items(user_id, start_date=..., end_date=..., context_codes=[...], observed_user_id=..., filter=...)` calls `GET /api/v1/users/:user_id/planner/items` (the data behind the Canvas "My Planner" dashboard). Returns `PlannerItem` objects with `name`, `date`/`due_at`, `type`, `context_name`, `course_id`, `points_possible`, `html_url` and submission completion state (`submitted`, `marked_complete`).
 
  - 0.0.28:
-	- Every HTTP request to the Canvas API is now written to a text log (the call URL, masked token, caller label, response status + body, and timestamps). Default log path is `/app/backend/data/canvas_api.log` (the Open WebUI data dir, volume-mounted to the host); override with `CANVAS_API_LOG_FILE`, and cap the logged response size with `CANVAS_API_LOG_MAX_BODY` (default 20000 chars).
-	- `Canvas(base_url, api_key, ..., label="Niclas")` / `CanvasApiClient(..., label=...)` optionally tags log entries with a caller label.
+- Every HTTP request to the Canvas API is now written to a text log (the call URL, masked token, caller label, response status + body, and timestamps). Default log path is `/app/backend/data/canvas_api.log` (the Open WebUI data dir, volume-mounted to the host); override with `CANVAS_API_LOG_FILE`, and cap the logged response size with `CANVAS_API_LOG_MAX_BODY` (default 20000 chars).
+- `Canvas(base_url, api_key, ..., label="Niclas")` / `CanvasApiClient(..., label=...)` optionally tags log entries with a caller label.
 
  - 0.0.27:
-	- `todo(user_id)` now requires a concrete student user id (calls `GET /api/v1/users/{user_id}/todo`); `'self'` is rejected so the to-do list always targets a specific student
+- `todo(user_id)` now requires a concrete student user id (calls `GET /api/v1/users/{user_id}/todo`); `'self'` is rejected so the to-do list always targets a specific student
 
  - 0.0.26:
-	- Added To-Do List endpoints: `todo()` (global, across all courses, `GET /api/v1/users/:user_id/todo`) and `course_todo(course_id)` (course-specific, `GET /api/v1/courses/:course_id/todo`)
+- Added To-Do List endpoints: `todo()` (global, across all courses, `GET /api/v1/users/:user_id/todo`) and `course_todo(course_id)` (course-specific, `GET /api/v1/courses/:course_id/todo`)
 
  - 0.0.25:
-	- `courses()` now defaults to `enrollment_state="active"` so concluded enrollments from previous school years are no longer returned; pass `enrollment_state="completed"` for past courses or `None` for the Canvas default
-	- Observees, Courses, Assignments and Submissions now follow every pagination page instead of only the first two
+- `courses()` now defaults to `enrollment_state="active"` so concluded enrollments from previous school years are no longer returned; pass `enrollment_state="completed"` for past courses or `None` for the Canvas default
+- Observees, Courses, Assignments and Submissions now follow every pagination page instead of only the first two
 
  - 0.0.24:
-	- Added Announcements, Calendar Events, single Assignment details, Assignment Groups, single Course (syllabus), Teachers, Modules (progress), and Activity Stream endpoints
+- Added Announcements, Calendar Events, single Assignment details, Assignment Groups, single Course (syllabus), Teachers, Modules (progress), and Activity Stream endpoints
 
  - 0.0.12:
     - Added pagination support to automatically paginate to end of available requests
 
  - 0.0.9:
-	- Added Submissions
+- Added Submissions

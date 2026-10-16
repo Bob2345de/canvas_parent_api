@@ -1,5 +1,25 @@
 # Changelog
 
+[2026-10-15 19:14] - Remove upstream URLs and regenerate share zip
+Summary: Removed the [project.urls] Homepage/Bug Tracker entries (schwartzpub/canvas_parent_api) from pyproject.toml and regenerated Canvas-Parent-Monitor-share.zip from the updated source so the shipped library metadata is fully rebranded (author "Me", no old-api/upstream references).
+
+Files changed:
+
+pyproject.toml — removed [project.urls] block (old upstream Homepage/Bug Tracker links).
+
+Canvas-Parent-Monitor-share.zip — regenerated from current source; verified shipped README/setup.py/pyproject contain no old references and author "Me".
+
+[2026-10-15 19:12] - Rebrand README/setup.py metadata; set author to "Me"
+Summary: Rewrote README.md to remove references to the old Home Assistant integration, rebranded it around the standalone library backing the Canvas Parent Monitor Open WebUI tool, and set the author to "Me" (email/URL left blank). Updated setup.py and pyproject.toml author metadata to match; left upstream Homepage/Bug Tracker URLs in pyproject.toml intact.
+
+Files changed:
+
+README.md — rewrote intro, removed Home Assistant / schwartzpub references, added "Author: Me", fixed indentation in the usage example.
+
+setup.py — author "Jacob Schwartz" -> "Me"; removed author_email and url.
+
+pyproject.toml — author block -> {name = "Me"}, removed old email.
+
 [2026-10-15 19:04] - Package self-contained share zip for Open WebUI / Claude users
 Summary: Built a distributable `Canvas-Parent-Monitor-share.zip` so the tool can be handed to someone else without depending on the remote GitHub URL in the tool's `requirements:` line. It contains the `Canvas Parent Monitor.json` tool, the full `canvas_parent_api` source tree (src/ + packaging files), a freshly built offline-install wheel, and an INSTALL.txt guide.
 
